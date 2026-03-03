@@ -10,6 +10,7 @@ Responsável por:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 try:
@@ -332,40 +333,64 @@ RESSALVAS:
 {lista_ressalvas}
 
 REGRAS DO DESPACHO:
-- SEMPRE começar com "Informo que"
+- SEMPRE começar com "Informo que".
 - NÃO citar NUP, número da requisição, nome da OM, nome do fornecedor ou CNPJ
-  no corpo do despacho (essas informações já constam em outras peças do processo)
-- Datas no formato militar: DD MES AA (ex: 16 FEV 26)
-  Meses abreviados: JAN, FEV, MAR, ABR, MAI, JUN, JUL, AGO, SET, OUT, NOV, DEZ
-- Tom formal, direto, objetivo
-- Ser EXTREMAMENTE objetivo e curto, focando APENAS no problema e na consequência
-- Citar valores e datas específicos quando necessário
-- Máximo de 4 a 5 linhas de texto, mesmo com múltiplos problemas
-- Se APROVADO: "Informo que após análise formal e legal, o processo 
-  encontra-se apto para prosseguimento."
-- Se APROVADO COM RESSALVA: descrever o problema e indicar que o 
-  processo pode seguir apesar dele
-- Se REPROVADO com 1 problema: descrever e finalizar com 
-  "o que impede o andamento do processo"
-- Se REPROVADO com múltiplos problemas: usar alíneas (a, b, c) e 
-  finalizar com "Solicito a regularização das pendências para 
-  prosseguimento"
+  no corpo do despacho (essas informações já constam em outras peças do processo).
+- Datas no formato militar: DD MES AA (ex: 16 FEV 26).
+  Meses abreviados: JAN, FEV, MAR, ABR, MAI, JUN, JUL, AGO, SET, OUT, NOV, DEZ.
+- Tom formal, direto, objetivo.
+- Ser EXTREMAMENTE objetivo e curto, focando APENAS no problema e na consequência.
+- Citar valores e datas específicos quando necessário.
+- Máximo de 4 a 5 linhas de texto, mesmo com múltiplos problemas.
+- NUNCA usar alíneas (a, b, c), numeração ou tópicos.
+- NUNCA usar bullet points ou listas (símbolos como "-", "•", "1.", "2." etc.).
+- O despacho deve ser SEMPRE texto corrido em períodos curtos.
+- NUNCA usar as palavras "solicito", "solicitamos", "requeiro" ou qualquer
+  forma de pedido/solicitação.
+- NUNCA usar palavras como "providenciar", "providencie", "providenciadas" ou
+  variações ("providenci..."), nem "regularizar", "regularização" ou variações
+  ("regulariz...") e nem "sanear", "saneamento" ou variações ("sane...").
+- O despacho APENAS APONTA o problema e informa a consequência, sem fazer
+  pedidos, recomendações, exigências ou determinações.
+- Se VEREDICTO = APROVADO:
+  Use texto curto no padrão:
+  "Informo que após análise formal e legal, o processo encontra-se apto para prosseguimento."
+- Se VEREDICTO = APROVADO_COM_RESSALVA:
+  Descreva o problema em uma ou mais frases curtas e, em seguida, informe que
+  o processo deve seguir, SEM usar verbos de pedido (como "solicito", "providenciar",
+  "regularizar", "sanear").
+- Se VEREDICTO = REPROVADO com 1 problema:
+  Descreva o problema e finalize SEMPRE com "o que impede o andamento do processo.".
+- Se VEREDICTO = REPROVADO com múltiplos problemas:
+  Liste todos os problemas em uma única frase em texto corrido, conectando-os
+  com vírgulas e utilizando "e" apenas antes do último item, finalizando SEMPRE
+  com "o que impede o andamento do processo.".
 - NUNCA dizer que "o processo foi reprovado" ou usar a palavra "reprovado"
   no texto do despacho. O despacho deve apenas INFORMAR irregularidades,
   não julgar o processo.
-- Para múltiplos problemas de certidões (ex.: vários itens do SICAF vencidos),
-  agrupar de forma natural, por exemplo:
-  "Informo que as seguintes certidões encontram-se vencidas, o que impede
-  o andamento do processo:
-  a) FGTS, vencida desde 25 FEV 26;
-  b) Receita Municipal, vencida desde 02 MAR 26.
-  Solicito a regularização das pendências para prosseguimento."
-- NÃO incluir cabeçalho, número de despacho ou assinatura
-- NÃO colocar o texto inteiro entre aspas ou crases
+
+EXEMPLOS PARA VEREDICTO = REPROVADO:
+- 1 problema:
+  "Informo que a certidão de FGTS encontra-se vencida desde 25 FEV 26, o que impede o andamento do processo."
+- 2 problemas:
+  "Informo que a certidão de FGTS encontra-se vencida desde 25 FEV 26 e a certidão de Receita Municipal
+  encontra-se vencida desde 02 MAR 26, o que impede o andamento do processo."
+- 3 problemas:
+  "Informo que a certidão de FGTS encontra-se vencida desde 25 FEV 26, a certidão de Receita Municipal
+  encontra-se vencida desde 02 MAR 26 e o CADIN encontra-se em situação irregular, o que impede o andamento
+  do processo."
+
+EXEMPLO PARA VEREDICTO = APROVADO_COM_RESSALVA:
+"Informo que o valor total da tabela de itens (R$ 2.034,15) diverge do cálculo real dos itens mencionados
+(R$ 2.046,85). O processo deve ser levado adiante considerando o último valor como sendo o valor real da
+requisição."
+
+- NÃO incluir cabeçalho, número de despacho ou assinatura.
+- NÃO colocar o texto inteiro entre aspas ou crases.
 - NÃO retornar sequências de caracteres "\\n" dentro do texto; use quebras
-  de linha reais quando necessário
+  de linha reais quando necessário.
 - Retornar APENAS o texto do despacho, sem JSON, sem aspas ao redor e 
-  sem markdown"""
+  sem markdown."""
 
 
 def generate_dispatch(
@@ -470,6 +495,58 @@ def generate_dispatch(
             text = text[1:-1].strip()
         # Limpa crases residuais nas extremidades
         text = text.strip("`").strip()
+
+        # Normalização final: remover marcadores de lista no início das linhas
+        # (alíneas, numeração, bullets) e juntar tudo em um único parágrafo.
+        raw_lines = [ln for ln in text.splitlines()]
+        cleaned_lines: List[str] = []
+        for ln in raw_lines:
+            stripped = ln.lstrip()
+            if not stripped:
+                continue
+            # Remove bullets simples (-, •, –) no início da linha
+            stripped = re.sub(r"^(?:[-•–])\s+", "", stripped)
+            # Remove alíneas (a), b), c)) e numeração (1., 2., 3.) no início da linha
+            stripped = re.sub(r"^(?:\(?[A-Za-z]\)|\d+\.?)\s+", "", stripped)
+            cleaned_lines.append(stripped)
+
+        if cleaned_lines:
+            text = " ".join(cleaned_lines)
+            text = re.sub(r"\s+", " ", text).strip()
+
+        # Remoção de quaisquer frases que contenham verbos de pedido/solicitação
+        # ou termos de providência/regularização/saneamento, conforme regras.
+        banned_pattern = re.compile(
+            r"(?i)(solicito|solicitamos|requeir|providenci|regulariz|sane)"
+        )
+        if banned_pattern.search(text):
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            filtered_sentences: List[str] = []
+            for sentence in sentences:
+                if not sentence.strip():
+                    continue
+                if banned_pattern.search(sentence):
+                    continue
+                filtered_sentences.append(sentence)
+
+            if filtered_sentences:
+                text = " ".join(filtered_sentences)
+                text = re.sub(r"\s+", " ", text).strip()
+
+        # Garante que despachos de veredicto reprovado terminem com
+        # "o que impede o andamento do processo."
+        if verdict == "reprovado":
+            base = text.strip()
+            target = "o que impede o andamento do processo"
+            if target not in base.lower():
+                # Remove ponto ou vírgula finais antes de anexar a expressão.
+                base = re.sub(r"[.,]\s*$", "", base).strip()
+                sep = ", " if base else ""
+                base = f"{base}{sep}o que impede o andamento do processo."
+            else:
+                if not base.rstrip().endswith("."):
+                    base = base.rstrip(". ").rstrip() + "."
+            text = base
 
         return text
     except Exception as exc:  # noqa: BLE001

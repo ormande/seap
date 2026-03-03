@@ -171,11 +171,21 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
                 UASG / UG Gerenciadora
               </p>
               <p className="mt-1 text-sm text-[var(--text-primary)]">
-                {data?.uasg
-                  ? `${data.uasg.codigo ?? ''}${
-                      data.uasg.nome ? ` – ${data.uasg.nome}` : ''
-                    }`.trim() || 'Não identificado'
-                  : 'Não identificado'}
+                {data?.uasg ? (
+                  <>
+                    <span className="font-semibold">
+                      {data.uasg.codigo ?? '—'}
+                    </span>
+                    {data.uasg.nome && (
+                      <span className="ml-1 text-[var(--text-secondary)]">
+                        {'– '}
+                        {data.uasg.nome}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  'Não identificado'
+                )}
               </p>
             </div>
             <ConfidenceBadge value={confidence?.uasg ?? null} />
