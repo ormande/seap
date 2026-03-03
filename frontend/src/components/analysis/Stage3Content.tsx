@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 
-import type { Stage3Destination, Stage3NC, Stage3Result } from '../../types/extraction';
+import type {
+  Stage3Destination,
+  Stage3NC,
+  Stage3NDCrossItem,
+  Stage3Result,
+} from '../../types/extraction';
 import { ConfidenceBadge } from './ConfidenceBadge';
 
 type Stage3ContentProps = {
@@ -191,6 +196,10 @@ export const Stage3Content: React.FC<Stage3ContentProps> = ({ data }) => {
   }
 
   const activeNc = ncs[Math.min(activeIdx, ncs.length - 1)];
+  const ndCross = data?.nd_crosscheck ?? null;
+  const ndInconsistencias: Stage3NDCrossItem[] = ndCross?.inconsistencias ?? [];
+  const ndCruzamentos: Stage3NDCrossItem[] = ndCross?.cruzamentos ?? [];
+  const ndTodosCompativeis = ndCross?.todos_compativeis ?? false;
 
   return (
     <div className="space-y-4">
@@ -314,10 +323,117 @@ export const Stage3Content: React.FC<Stage3ContentProps> = ({ data }) => {
               Dados complementados pela requisição
             </span>
           )}
+        </div>
 
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-80 dark:bg-slate-500/20 dark:text-slate-200">
-            Cruzamento ND × Itens — Em breve
-          </span>
+        {/* Cruzamento ND × Itens */}
+        <div className="mt-2 space-y-2">
+          {ndCross ? (
+            ndTodosCompativeis || ndInconsistencias.length === 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-100">
+                <span className="text-xs">✓</span>
+                ND compatível com todos os itens analisados
+              </span>
+            ) : (
+              <div className="rounded-lg border border-amber-400/70 bg-amber-50/80 p-2 text-[11px] text-amber-900 shadow-sm dark:border-amber-300/60 dark:bg-amber-900/20 dark:text-amber-50">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-bold text-amber-800 dark:bg-amber-400/30 dark:text-amber-50">
+                      !
+                    </span>
+                    <p className="font-semibold">
+                      Inconsistências de ND entre a NC e os itens da requisição
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-amber-900/80 dark:text-amber-100/80">
+                    {ndInconsistencias.length}{' '}
+                    {ndInconsistencias.length === 1 ? 'item com alerta' : 'itens com alerta'}
+                  </span>
+                </div>
+
+                <div className="mt-2 max-h-56 overflow-auto rounded-md border border-amber-200/70 bg-white/70 text-[11px] dark:border-amber-400/40 dark:bg-amber-950/40">
+                  <table className="min-w-full border-collapse">
+                    <thead className="bg-amber-100/80 text-[10px] uppercase tracking-wide text-amber-900 dark:bg-amber-900/60 dark:text-amber-50/90">
+                      <tr>
+                        <th className="border-b border-amber-200 px-2 py-1 text-left">Item</th>
+                        <th className="border-b border-amber-200 px-2 py-1 text-left">
+                          Descrição
+                        </th>
+                        <th className="border-b border-amber-200 px-2 py-1 text-left">ND NC</th>
+                        <th className="border-b border-amber-200 px-2 py-1 text-left">
+                          ND Requisição
+                        </th>
+                        <th className="border-b border-amber-200 px-2 py-1 text-left">
+                          Classificação IA
+                        </th>
+                        <th className="border-b border-amber-200 px-2 py-1 text-left">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ndCruzamentos.map((row, idx) => {
+                        const isInconsistent =
+                          row.compativel === false ||
+                          row.nd_nc_compativel === false ||
+                          row.nd_req_compativel === false;
+
+                        return (
+                          <tr
+                            key={`${row.item ?? idx}-${row.nd_nc ?? 'nd'}-${idx}`}
+                            className={[
+                              'transition-colors',
+                              idx % 2 === 0 ? 'bg-amber-50/70' : 'bg-amber-50/30',
+                              isInconsistent ? 'bg-amber-100/90' : '',
+                            ].join(' ')}
+                          >
+                            <td className="border-b border-amber-100 px-2 py-1 align-top text-[11px] font-medium text-amber-900">
+                              {row.item ?? '—'}
+                            </td>
+                            <td className="border-b border-amber-100 px-2 py-1 align-top text-[11px] text-amber-900">
+                              <span
+                                className="line-clamp-2"
+                                title={row.descricao ?? undefined}
+                              >
+                                {row.descricao ?? '—'}
+                              </span>
+                            </td>
+                            <td className="border-b border-amber-100 px-2 py-1 align-top text-[11px] text-amber-900">
+                              {row.nd_nc ?? '—'}
+                            </td>
+                            <td className="border-b border-amber-100 px-2 py-1 align-top text-[11px] text-amber-900">
+                              {row.nd_req ?? '—'}
+                            </td>
+                            <td
+                              className="border-b border-amber-100 px-2 py-1 align-top text-[11px] text-amber-900"
+                              title={row.nome_subelemento ?? undefined}
+                            >
+                              {row.classificacao_label ?? '—'}
+                            </td>
+                            <td
+                              className="border-b border-amber-100 px-2 py-1 align-top text-[11px]"
+                              title={row.justificativa ?? undefined}
+                            >
+                              {isInconsistent ? (
+                                <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/30 dark:text-amber-50">
+                                  ⚠ ND possivelmente inadequada
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/30 dark:text-emerald-50">
+                                  ✓ ND compatível
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-80 dark:bg-slate-500/20 dark:text-slate-200">
+              Cruzamento ND × Itens não disponível para esta análise
+            </span>
+          )}
         </div>
       </div>
     </div>

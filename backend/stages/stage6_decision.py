@@ -77,7 +77,6 @@ def collect_issues(
     # --- Estágio 2: cálculos e campos principais ---
     if stage2 and stage2.data:
         data2 = stage2.data
-        conf2 = stage2.confidence
 
         # Cálculos divergentes → ressalva.
         vc = data2.verificacao_calculos
@@ -105,27 +104,6 @@ def collect_issues(
                 )
         elif vc and vc.correto:
             pontos_positivos.append("Cálculos da tabela de itens conferem com os valores informados.")
-
-        # Campos não identificados (instrumento, UASG) com confiança baixa (< 70) → ressalva.
-        if conf2:
-            if (not data2.instrumento) or conf2.instrumento < 70:
-                ressalvas.append(
-                    Stage6Issue(
-                        estagio=2,
-                        tipo="ressalva",
-                        descricao="Instrumento da contratação com baixa confiança ou não identificado.",
-                        detalhes=f"Confiança do instrumento: {conf2.instrumento}%",
-                    )
-                )
-            if (not data2.uasg) or conf2.uasg < 70:
-                ressalvas.append(
-                    Stage6Issue(
-                        estagio=2,
-                        tipo="ressalva",
-                        descricao="UASG/UG gerenciadora com baixa confiança ou não identificada.",
-                        detalhes=f"Confiança da UASG: {conf2.uasg}%",
-                    )
-                )
 
     # --- Estágio 3: Notas de Crédito ---
     if stage3:
@@ -164,6 +142,49 @@ def collect_issues(
                 else:
                     pontos_positivos.append("Notas de Crédito compatíveis com o valor total da requisição.")
 
+            # Cruzamento ND × Itens (ressalvas informativas — não reprova)
+            nd_cross = getattr(stage3, "nd_crosscheck", None)
+            if nd_cross and getattr(nd_cross, "inconsistencias", None):
+                for inc in nd_cross.inconsistencias:  # type: ignore[attr-defined]
+                    try:
+                        item_num = getattr(inc, "item", None)
+                        descricao_item = getattr(inc, "descricao", None)
+                        classificacao_label = getattr(inc, "classificacao_label", None)
+                        nd_nc = getattr(inc, "nd_nc", None)
+                        nd_req = getattr(inc, "nd_req", None)
+                        justificativa = getattr(inc, "justificativa", None)
+
+                        detalhes_parts: List[str] = []
+                        if descricao_item:
+                            detalhes_parts.append(f"Item: {descricao_item}.")
+                        if classificacao_label:
+                            detalhes_parts.append(
+                                f"Classificação sugerida: {classificacao_label}."
+                            )
+                        if nd_nc:
+                            detalhes_parts.append(f"ND da NC: {nd_nc}.")
+                        if nd_req:
+                            detalhes_parts.append(f"ND na requisição: {nd_req}.")
+                        if justificativa:
+                            detalhes_parts.append(str(justificativa).strip())
+
+                        detalhes_txt = " ".join(detalhes_parts) if detalhes_parts else None
+                    except Exception:  # noqa: BLE001
+                        detalhes_txt = None
+
+                    descricao_issue = (
+                        f"Incompatibilidade entre a ND da NC e a natureza do item "
+                        f"{item_num if item_num is not None else '?'}."
+                    )
+                    ressalvas.append(
+                        Stage6Issue(
+                            estagio=3,
+                            tipo="ressalva",
+                            descricao=descricao_issue,
+                            detalhes=detalhes_txt,
+                        )
+                    )
+
     # --- Estágio 4: Documentação (CADIN, TCU, SICAF, CNPJ) ---
     if stage4:
         cadin = stage4.cadin or {}
@@ -198,18 +219,12 @@ def collect_issues(
         # SICAF vencido / irregular.
         sicaf_encontrado = bool(sicaf.get("encontrado"))
         sicaf_aprovado = bool(sicaf.get("aprovado"))
+        has_complement = any(c.get("anula_reprovacao") for c in complementares or [])
         if sicaf_encontrado and not sicaf_aprovado:
-            # Verifica se há documento complementar que anula a reprovação.
-            has_complement = any(c.get("anula_reprovacao") for c in complementares or [])
             if has_complement:
-                ressalvas.append(
-                    Stage6Issue(
-                        estagio=4,
-                        tipo="ressalva",
-                        descricao="SICAF com pendência sanada por documento complementar.",
-                        detalhes="Há documento complementar que comprova a regularidade, mas o SICAF principal está vencido/irregular.",
-                    )
-                )
+                # Documento complementar anula a reprovação do SICAF.
+                # Não gera reprovação nem ressalva — problema considerado resolvido.
+                pass
             else:
                 # Quando há itens vencidos detalhados, cada um vira uma reprovação separada.
                 itens_vencidos = sicaf.get("itens_vencidos") or []
@@ -276,26 +291,6 @@ def collect_issues(
                 )
             )
 
-    # --- Confiança baixa em campos extraídos (< 70%) → ressalvas gerais ---
-    if stage1 and stage1.confidence and stage1.confidence.geral < 70:
-        ressalvas.append(
-            Stage6Issue(
-                estagio=1,
-                tipo="ressalva",
-                descricao="Confiança baixa na identificação do processo (Estágio 1).",
-                detalhes=f"Confiança geral: {stage1.confidence.geral}%.",
-            )
-        )
-    if stage2 and stage2.confidence and stage2.confidence.geral < 70:
-        ressalvas.append(
-            Stage6Issue(
-                estagio=2,
-                tipo="ressalva",
-                descricao="Confiança baixa na análise da peça da requisição.",
-                detalhes=f"Confiança geral: {stage2.confidence.geral}%.",
-            )
-        )
-
     return {
         "reprovacoes": reprovacoes,
         "ressalvas": ressalvas,
@@ -352,6 +347,9 @@ REGRAS DO DESPACHO:
   ("regulariz...") e nem "sanear", "saneamento" ou variações ("sane...").
 - O despacho APENAS APONTA o problema e informa a consequência, sem fazer
   pedidos, recomendações, exigências ou determinações.
+- NUNCA mencionar problemas de extração de dados, confiança baixa, campos não
+  identificados ou limitações do sistema no despacho. O despacho trata APENAS
+  de irregularidades do processo.
 - Se VEREDICTO = APROVADO:
   Use texto curto no padrão:
   "Informo que após análise formal e legal, o processo encontra-se apto para prosseguimento."

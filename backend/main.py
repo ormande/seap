@@ -90,6 +90,7 @@ try:
         stage4_documentation,
         stage5_dispatches,
         stage6_decision,
+        nd_crosscheck,
     )
 except ImportError:
     from stages import (
@@ -99,6 +100,7 @@ except ImportError:
         stage4_documentation,
         stage5_dispatches,
         stage6_decision,
+        nd_crosscheck,
     )
 
 app = FastAPI(title="Licitacao PDF Extractor", version="0.1.0")
@@ -469,6 +471,27 @@ async def analyze_pdf(
                 total_pages,
             )
             stage3_result = Stage3Result(**stage3_raw)
+
+            # Cruzamento ND × Itens (estágio 3 complementar)
+            if (
+                stage3_result
+                and stage3_result.ncs
+                and stage2_result
+                and stage2_result.data
+                and stage2_result.data.itens
+            ):
+                try:
+                    primary_nc = stage3_result.ncs[0]
+                    if primary_nc.destinos:
+                        nd_cross = await nd_crosscheck.cross_check_nd_items(
+                            nc_destinos=primary_nc.destinos,
+                            items=stage2_result.data.itens,
+                            nd_req=None,
+                        )
+                        stage3_result.nd_crosscheck = nd_cross
+                except Exception as exc:  # noqa: BLE001
+                    # Em caso de falha no cruzamento, apenas registra log e segue fluxo principal.
+                    print(f"[Stage3] Falha no cruzamento ND × Itens: {exc}")
 
             yield f"data: {json.dumps({'phase': 'stage3_done', 'progress': 60, 'message': 'Estágio 3 concluído.'})}\n\n"
 

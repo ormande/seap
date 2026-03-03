@@ -210,9 +210,34 @@ export type Stage3NC = {
   confidence: Stage3NCConfidence;
 };
 
+export type Stage3NDCrossItem = {
+  item: number | null;
+  descricao: string | null;
+  unidade: string | null;
+  nd_nc: string | null;
+  nd_req: string | null;
+  classificacao_sugerida: string | null;
+  classificacao_label: string | null;
+  subelemento_sugerido: string | null;
+  nome_subelemento: string | null;
+  nd_nc_compativel: boolean | null;
+  nd_req_compativel: boolean | null;
+  compativel: boolean | null;
+  metodo: string | null;
+  justificativa: string | null;
+  confianca: number | null;
+};
+
+export type Stage3NDCrosscheck = {
+  cruzamentos: Stage3NDCrossItem[];
+  todos_compativeis: boolean;
+  inconsistencias: Stage3NDCrossItem[];
+};
+
 export type Stage3Result = {
   status: 'success' | 'partial' | 'error' | string;
   ncs: Stage3NC[];
+  nd_crosscheck?: Stage3NDCrosscheck | null;
 };
 
 // ---- Estágio 5 — Despachos ----

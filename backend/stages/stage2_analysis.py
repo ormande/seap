@@ -208,21 +208,25 @@ def _normalize_for_regex(text: str) -> str:
 
 
 def normalize_instrument_year(numero: str) -> str:
-    """Garante que o ano no número do instrumento tenha 4 dígitos."""
-    match = re.match(r"^(.+?)(\d{2})$", numero)
-    if not match:
-        return numero
+    """
+    Garante que o ano no número do instrumento tenha 4 dígitos.
 
-    prefix = match.group(1)
-    year_2d = match.group(2)
-
-    try:
-        year_int = int(year_2d)
-    except ValueError:
-        return numero
-
-    year_4d = f"20{year_2d}" if year_int < 50 else f"19{year_2d}"
-    return f"{prefix}{year_4d}"
+    Regra: só normalizar se o ano tiver EXATAMENTE 2 dígitos.
+    O ano é considerado como o trecho após a última barra "/" ou hífen "-".
+    """
+    match = re.search(r"[/-](\d+)$", numero)
+    if match:
+        year_part = match.group(1)
+        if len(year_part) == 2:
+            try:
+                year_int = int(year_part)
+            except ValueError:
+                return numero
+            year_4d = f"20{year_part}" if year_int < 50 else f"19{year_part}"
+            # Substitui apenas a parte do ano, preservando o restante do número.
+            return numero[: match.start(1)] + year_4d
+        # Se já tiver 4 dígitos (ou outro tamanho), não alterar.
+    return numero
 
 
 def _safe_decimal(value: Any) -> Optional[Decimal]:
@@ -941,18 +945,27 @@ def _compute_confidence(
 def _build_stage2_uasg(
     codigo: Optional[str],
     nome: Optional[str],
+    instrumento_tipo: Optional[str] = None,
 ) -> Stage2UASG:
     """
     Constrói o objeto UASG garantindo que, quando houver código conhecido,
     o nome da OM venha do mapa fixo. Se o código não estiver no mapa,
-    mantém apenas o código (nome = None). Quando não há código, preserva
-    apenas o nome informado.
+    mantém apenas o código (nome = None).
+
+    Quando não há código:
+    - Se o instrumento é Contrato, UASG é opcional. Retorna marcador
+      "N/A (Contrato)" para exibição no frontend;
+    - Caso contrário, preserva apenas o nome informado.
     """
     codigo_norm = (codigo or "").strip() or None
 
     if codigo_norm:
         mapped_name = UASG_TO_OM.get(codigo_norm)
         return Stage2UASG(codigo=codigo_norm, nome=mapped_name)
+
+    # Para contratos, a UASG pode não existir no processo sem ser erro.
+    if instrumento_tipo and "contrato" in instrumento_tipo.lower():
+        return Stage2UASG(codigo=None, nome="N/A (Contrato)")
 
     return Stage2UASG(codigo=None, nome=nome)
 
@@ -1035,6 +1048,7 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
         uasg=_build_stage2_uasg(
             codigo=uasg_data.get("codigo"),
             nome=uasg_data.get("nome"),
+            instrumento_tipo=instrumento_data.get("tipo"),
         )
         if any(uasg_data.values())
         else None,
@@ -1086,6 +1100,7 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
                 data.uasg = _build_stage2_uasg(
                     codigo=uasg_ai.get("codigo"),
                     nome=uasg_ai.get("nome"),
+                    instrumento_tipo=inst_ai.get("tipo"),
                 )
             if not data.tipo_empenho and tipo_ai:
                 data.tipo_empenho = tipo_ai
@@ -1112,12 +1127,23 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
                 data.uasg = _build_stage2_uasg(
                     codigo=uasg_fb.get("codigo"),
                     nome=uasg_fb.get("nome"),
+                    instrumento_tipo=inst_fb.get("tipo"),
                 )
 
     if data.instrumento and data.instrumento.numero:
         data.instrumento.numero = normalize_instrument_year(data.instrumento.numero)
 
     confidence = _compute_confidence(data, ai_conf=ai_conf)
+
+    # Para contratos, a UASG é opcional; para os demais instrumentos
+    # (Pregão, Dispensa, Inexigibilidade, Ata de Registro de Preços),
+    # a ausência de UASG caracteriza extração incompleta (status partial).
+    instrumento_tipo_lower = (
+        (data.instrumento.tipo or "").lower() if data.instrumento else ""
+    )
+    uasg_obrigatoria = not (
+        instrumento_tipo_lower and "contrato" in instrumento_tipo_lower
+    )
 
     if (
         not data.instrumento
@@ -1128,7 +1154,7 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
         and not data.itens
     ):
         status = "error"
-    elif not data.itens or not data.instrumento or not data.uasg:
+    elif not data.itens or not data.instrumento or (uasg_obrigatoria and not data.uasg):
         status = "partial"
     else:
         status = "success"

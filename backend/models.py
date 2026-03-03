@@ -476,6 +476,106 @@ class Stage3NC(BaseModel):
     )
 
 
+class Stage3NDCrossItem(BaseModel):
+    """
+    Resultado do cruzamento ND × Itens para um item específico.
+
+    Representa a compatibilidade entre:
+    - ND da NC (destino orçamentário);
+    - ND/SI informada na requisição para o item;
+    - classificação correta inferida (material, serviço ou equipamento).
+    """
+
+    item: Optional[int] = Field(
+        default=None,
+        description="Número do item na requisição.",
+    )
+    descricao: Optional[str] = Field(
+        default=None,
+        description="Descrição (resumida) do item.",
+    )
+    unidade: Optional[str] = Field(
+        default=None,
+        description="Unidade de medida do item (un, kg, svc, etc.).",
+    )
+    nd_nc: Optional[str] = Field(
+        default=None,
+        description="ND completa utilizada na Nota de Crédito (NC), ex.: 339039.",
+    )
+    nd_req: Optional[str] = Field(
+        default=None,
+        description="ND/SI associada ao item na requisição (formato livre, ex.: 30.24).",
+    )
+    classificacao_sugerida: Optional[str] = Field(
+        default=None,
+        description="Elemento sugerido para o item: '30', '39' ou '52'.",
+    )
+    classificacao_label: Optional[str] = Field(
+        default=None,
+        description="Rótulo amigável da classificação (Material, Serviço, Equipamento).",
+    )
+    subelemento_sugerido: Optional[str] = Field(
+        default=None,
+        description="Código do subelemento sugerido (dois dígitos, ex.: '17').",
+    )
+    nome_subelemento: Optional[str] = Field(
+        default=None,
+        description="Descrição do subelemento sugerido.",
+    )
+    nd_nc_compativel: Optional[bool] = Field(
+        default=None,
+        description="Se a ND da NC é compatível com a natureza do item.",
+    )
+    nd_req_compativel: Optional[bool] = Field(
+        default=None,
+        description="Se a ND/SI da requisição é compatível com a natureza do item.",
+    )
+    compativel: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Compatibilidade geral do item (considerando ND da NC e da requisição). "
+            "False indica alguma inconsistência relevante."
+        ),
+    )
+    metodo: Optional[str] = Field(
+        default=None,
+        description="Método utilizado: 'palavras_chave' (rápido) ou 'ia' (Gemini).",
+    )
+    justificativa: Optional[str] = Field(
+        default=None,
+        description="Justificativa textual da classificação (quando fornecida pela IA).",
+    )
+    confianca: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Score de confiança da classificação (0 a 100), quando disponível.",
+    )
+
+
+class Stage3NDCrosscheck(BaseModel):
+    """
+    Resultado agregado do cruzamento ND × Itens.
+
+    - cruzamentos: todos os itens analisados;
+    - todos_compativeis: True se nenhum item apresentou inconsistência relevante;
+    - inconsistencias: subconjunto de cruzamentos com compativel == False.
+    """
+
+    cruzamentos: List[Stage3NDCrossItem] = Field(
+        default_factory=list,
+        description="Lista de resultados por item no cruzamento ND × Itens.",
+    )
+    todos_compativeis: bool = Field(
+        default=True,
+        description="Indica se todas as combinações ND × Itens foram consideradas compatíveis.",
+    )
+    inconsistencias: List[Stage3NDCrossItem] = Field(
+        default_factory=list,
+        description="Lista de itens com alguma inconsistência de ND.",
+    )
+
+
 class Stage3Result(BaseModel):
     """Resultado completo do estágio 3 (Notas de Crédito)."""
 
@@ -489,6 +589,10 @@ class Stage3Result(BaseModel):
     ncs: List[Stage3NC] = Field(
         default_factory=list,
         description="Lista de Notas de Crédito identificadas no PDF.",
+    )
+    nd_crosscheck: Optional[Stage3NDCrosscheck] = Field(
+        default=None,
+        description="Resultado do cruzamento ND × Itens entre a NC e a requisição.",
     )
 
 
