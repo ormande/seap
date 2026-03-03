@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens principais (light / dark)
+ * Gerenciados via classe `light` / `dark` no <html> (next-themes).
+ */
+
+:root {
+  color-scheme: light;
+}
+
+html.light {
+  --bg-main: #ffffff;        /* fundo principal */
+  --bg-muted: #f3f4f6;       /* área de conteúdo */
+  --bg-sidebar: #ffffff;     /* sidebar */
+  --bg-card: #f9fafb;        /* cards */
+  --border-subtle: #e5e7eb;  /* bordas */
+  --text-primary: #111827;   /* textos principais */
+  --text-secondary: #6b7280; /* textos secundários */
+}
+
+html.dark {
+  color-scheme: dark;
+  --bg-main: #0f1117;
+  --bg-muted: #020617;
+  --bg-sidebar: #0f1117;
+  --bg-card: #1a1d25;
+  --border-subtle: #1f2937;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+}
+
+@theme inline {
+  --color-background: var(--bg-main);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-comfortaa);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+}
