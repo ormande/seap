@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal
 
 import pdfplumber
+import platform
 
 from .models import AnchorConfig, AnchorPageResult
 
@@ -15,7 +16,11 @@ from .models import AnchorConfig, AnchorPageResult
 #   OU passar poppler_path=... em convert_from_path() apontando para a pasta bin/
 from pdf2image import convert_from_path
 
-POPPLER_PATH = r"C:\Users\User\anaconda3\envs\projeto_pdf\Library\bin"
+if platform.system() == "Windows":
+    POPPLER_PATH = r"C:\Users\User\anaconda3\envs\projeto_pdf\Library\bin"
+else:
+    # Em ambientes Linux (ex.: Railway), o poppler é instalado via apt e fica no PATH.
+    POPPLER_PATH = None
 
 
 PageType = Literal["nativa", "escaneada"]
@@ -53,13 +58,15 @@ def page_to_base64(pdf_path: str | Path, page_number: int) -> str:
     """
     pdf_path = Path(pdf_path)
     try:
-        images = convert_from_path(
-            str(pdf_path),
-            first_page=page_number,
-            last_page=page_number,
-            dpi=200,
-            poppler_path=POPPLER_PATH,
-        )
+        kwargs: Dict[str, Any] = {
+            "first_page": page_number,
+            "last_page": page_number,
+            "dpi": 200,
+        }
+        if POPPLER_PATH:
+            kwargs["poppler_path"] = POPPLER_PATH
+
+        images = convert_from_path(str(pdf_path), **kwargs)
         if images:
             buffer = io.BytesIO()
             images[0].save(buffer, format="PNG")
