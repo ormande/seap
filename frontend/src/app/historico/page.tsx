@@ -173,41 +173,49 @@ export default function HistoricoPage() {
         id: 'nup',
         header: 'NUP',
         accessorFn: (r) => r.nup ?? '—',
-        cell: ({ getValue }: { getValue: () => string }) => (
-          <span className="text-xs font-medium text-[var(--text-primary)]">{getValue()}</span>
+        cell: (info) => (
+          <span className="text-xs font-medium text-[var(--text-primary)]">
+            {String(info.getValue())}
+          </span>
         ),
       },
       {
         id: 'requisicao',
         header: 'Req',
         accessorFn: (r) => r.requisicao ?? '—',
-        cell: ({ getValue }: { getValue: () => string }) => (
-          <span className="text-xs text-[var(--text-secondary)]">{getValue()}</span>
+        cell: (info) => (
+          <span className="text-xs text-[var(--text-secondary)]">
+            {String(info.getValue())}
+          </span>
         ),
       },
       {
         id: 'om_sigla',
         header: 'OM',
         accessorFn: (r) => r.om_sigla ?? r.om ?? '—',
-        cell: ({ getValue }: { getValue: () => string }) => (
-          <span className="text-xs text-[var(--text-secondary)]">{getValue()}</span>
+        cell: (info) => (
+          <span className="text-xs text-[var(--text-secondary)]">
+            {String(info.getValue())}
+          </span>
         ),
       },
       {
         id: 'instrumento',
         header: 'Instrumento',
         accessorFn: instrumentoLabel,
-        cell: ({ getValue }: { getValue: () => string }) => (
-          <span className="text-xs text-[var(--text-secondary)]">{getValue()}</span>
+        cell: (info) => (
+          <span className="text-xs text-[var(--text-secondary)]">
+            {String(info.getValue())}
+          </span>
         ),
       },
       {
         id: 'valor_total',
         header: 'Valor Total',
         accessorFn: (r) => r.valor_total ?? 0,
-        cell: ({ getValue }: { getValue: () => number }) => (
+        cell: (info) => (
           <span className="text-xs tabular-nums text-[var(--text-primary)]">
-            {formatCurrency(getValue())}
+            {formatCurrency(Number(info.getValue()))}
           </span>
         ),
       },
@@ -215,8 +223,10 @@ export default function HistoricoPage() {
         id: 'qtd_itens',
         header: 'Itens',
         accessorFn: (r) => r.qtd_itens ?? 0,
-        cell: ({ getValue }: { getValue: () => number }) => (
-          <span className="text-xs text-[var(--text-secondary)]">{String(getValue())}</span>
+        cell: (info) => (
+          <span className="text-xs text-[var(--text-secondary)]">
+            {String(info.getValue())}
+          </span>
         ),
       },
       {
@@ -229,9 +239,9 @@ export default function HistoricoPage() {
         id: 'data_analise',
         header: 'Data',
         accessorFn: (r) => r.data_analise ?? '',
-        cell: ({ getValue }: { getValue: () => string }) => (
+        cell: (info) => (
           <span className="text-xs text-[var(--text-secondary)]">
-            {formatDate(getValue())}
+            {formatDate(String(info.getValue()))}
           </span>
         ),
       },
