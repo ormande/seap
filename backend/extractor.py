@@ -7,7 +7,10 @@ from typing import Any, Dict, List, Literal
 import pdfplumber
 import platform
 
-from .models import AnchorConfig, AnchorPageResult
+try:
+    from .models import AnchorConfig, AnchorPageResult
+except ImportError:
+    from models import AnchorConfig, AnchorPageResult
 
 # Para page_to_base64 é necessário: pip install pdf2image
 # No Windows, instalar também o Poppler (pdf2image depende dele para converter PDF em imagem):

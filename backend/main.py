@@ -12,43 +12,94 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .ai_processor import GeminiProcessor
-from .database import (
-    delete_analysis,
-    get_all_analyses,
-    get_analysis_by_id,
-    init_db,
-    insert_analysis,
-)
-from .extractor import extract_all_pages, extract_with_anchors
-from .models import (
-    AnchorConfig,
-    AnalyzeResponse,
-    AnalyzeStages,
-    AnalyzeMetadata,
-    CorreçãoItem,
-    ExtractionResult,
-    FullExtractionResult,
-    Stage1Confidence,
-    Stage1Data,
-    Stage1OM,
-    Stage1Requisicao,
-    Stage1Result,
-    Stage2Result,
-    Stage3Result,
-    Stage4Result,
-    Stage5Result,
-    Stage6Result,
-    VerificationResult,
-)
-from .stages import (
-    stage1_identification,
-    stage2_analysis,
-    stage3_nc,
-    stage4_documentation,
-    stage5_dispatches,
-    stage6_decision,
-)
+try:
+    from .ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
+
+try:
+    from .database import (
+        delete_analysis,
+        get_all_analyses,
+        get_analysis_by_id,
+        init_db,
+        insert_analysis,
+    )
+except ImportError:
+    from database import (
+        delete_analysis,
+        get_all_analyses,
+        get_analysis_by_id,
+        init_db,
+        insert_analysis,
+    )
+
+try:
+    from .extractor import extract_all_pages, extract_with_anchors
+except ImportError:
+    from extractor import extract_all_pages, extract_with_anchors
+
+try:
+    from .models import (
+        AnchorConfig,
+        AnalyzeResponse,
+        AnalyzeStages,
+        AnalyzeMetadata,
+        CorreçãoItem,
+        ExtractionResult,
+        FullExtractionResult,
+        Stage1Confidence,
+        Stage1Data,
+        Stage1OM,
+        Stage1Requisicao,
+        Stage1Result,
+        Stage2Result,
+        Stage3Result,
+        Stage4Result,
+        Stage5Result,
+        Stage6Result,
+        VerificationResult,
+    )
+except ImportError:
+    from models import (
+        AnchorConfig,
+        AnalyzeResponse,
+        AnalyzeStages,
+        AnalyzeMetadata,
+        CorreçãoItem,
+        ExtractionResult,
+        FullExtractionResult,
+        Stage1Confidence,
+        Stage1Data,
+        Stage1OM,
+        Stage1Requisicao,
+        Stage1Result,
+        Stage2Result,
+        Stage3Result,
+        Stage4Result,
+        Stage5Result,
+        Stage6Result,
+        VerificationResult,
+    )
+
+try:
+    from .stages import (
+        stage1_identification,
+        stage2_analysis,
+        stage3_nc,
+        stage4_documentation,
+        stage5_dispatches,
+        stage6_decision,
+    )
+except ImportError:
+    from stages import (
+        stage1_identification,
+        stage2_analysis,
+        stage3_nc,
+        stage4_documentation,
+        stage5_dispatches,
+        stage6_decision,
+    )
 
 app = FastAPI(title="Licitacao PDF Extractor", version="0.1.0")
 

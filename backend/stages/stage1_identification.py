@@ -13,7 +13,10 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
-from ..ai_processor import GeminiProcessor
+try:
+    from ..ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
 
 logger = logging.getLogger(__name__)
 

@@ -16,13 +16,25 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from ..ai_processor import GeminiProcessor
-from ..models import (
-    Stage5Dispatch,
-    Stage5Exigencia,
-    Stage5ExigenciaStatus,
-    Stage5Result,
-)
+try:
+    from ..ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
+
+try:
+    from ..models import (
+        Stage5Dispatch,
+        Stage5Exigencia,
+        Stage5ExigenciaStatus,
+        Stage5Result,
+    )
+except ImportError:
+    from models import (
+        Stage5Dispatch,
+        Stage5Exigencia,
+        Stage5ExigenciaStatus,
+        Stage5Result,
+    )
 
 logger = logging.getLogger(__name__)
 

@@ -15,8 +15,15 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-from ..ai_processor import GeminiProcessor
-from ..models import Stage4Result
+try:
+    from ..ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
+
+try:
+    from ..models import Stage4Result
+except ImportError:
+    from models import Stage4Result
 
 logger = logging.getLogger(__name__)
 

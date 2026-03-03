@@ -24,14 +24,30 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import google.generativeai as genai
 
-from ..ai_processor import GeminiProcessor
-from ..extractor import page_to_base64
-from ..models import (
-    Stage3Destination,
-    Stage3NC,
-    Stage3NCConfidence,
-    Stage3Result,
-)
+try:
+    from ..ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
+
+try:
+    from ..extractor import page_to_base64
+except ImportError:
+    from extractor import page_to_base64
+
+try:
+    from ..models import (
+        Stage3Destination,
+        Stage3NC,
+        Stage3NCConfidence,
+        Stage3Result,
+    )
+except ImportError:
+    from models import (
+        Stage3Destination,
+        Stage3NC,
+        Stage3NCConfidence,
+        Stage3Result,
+    )
 
 logger = logging.getLogger(__name__)
 

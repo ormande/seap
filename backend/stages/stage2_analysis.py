@@ -16,17 +16,33 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..ai_processor import GeminiProcessor
-from ..models import (
-    Stage2Confidence,
-    Stage2Data,
-    Stage2Divergencia,
-    Stage2Instrument,
-    Stage2Item,
-    Stage2Result,
-    Stage2UASG,
-    Stage2VerificacaoCalculos,
-)
+try:
+    from ..ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
+
+try:
+    from ..models import (
+        Stage2Confidence,
+        Stage2Data,
+        Stage2Divergencia,
+        Stage2Instrument,
+        Stage2Item,
+        Stage2Result,
+        Stage2UASG,
+        Stage2VerificacaoCalculos,
+    )
+except ImportError:
+    from models import (
+        Stage2Confidence,
+        Stage2Data,
+        Stage2Divergencia,
+        Stage2Instrument,
+        Stage2Item,
+        Stage2Result,
+        Stage2UASG,
+        Stage2VerificacaoCalculos,
+    )
 
 logger = logging.getLogger(__name__)
 

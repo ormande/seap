@@ -12,16 +12,31 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from ..ai_processor import GeminiProcessor
-from ..models import (
-    Stage1Result,
-    Stage2Result,
-    Stage3Result,
-    Stage4Result,
-    Stage5Result,
-    Stage6Issue,
-    Stage6Result,
-)
+try:
+    from ..ai_processor import GeminiProcessor
+except ImportError:
+    from ai_processor import GeminiProcessor
+
+try:
+    from ..models import (
+        Stage1Result,
+        Stage2Result,
+        Stage3Result,
+        Stage4Result,
+        Stage5Result,
+        Stage6Issue,
+        Stage6Result,
+    )
+except ImportError:
+    from models import (
+        Stage1Result,
+        Stage2Result,
+        Stage3Result,
+        Stage4Result,
+        Stage5Result,
+        Stage6Issue,
+        Stage6Result,
+    )
 
 logger = logging.getLogger(__name__)
 
