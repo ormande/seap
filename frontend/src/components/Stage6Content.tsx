@@ -224,9 +224,16 @@ const DispatchSection: React.FC<{ data: Stage6Result }> = ({ data }) => {
 const StageSummary: React.FC<{ data: Stage6Result }> = ({ data }) => {
   const status6 = data.status;
 
+  type StageStatus = 'ok' | 'warn' | 'error' | 'info' | 'none';
+  type StageChip = {
+    label: string;
+    desc: string;
+    status: StageStatus;
+  };
+
   const iconFor = useMemo(
     () =>
-      (value: 'ok' | 'warn' | 'error' | 'info' | 'none'): {
+      (value: StageStatus): {
         icon: React.ReactNode;
         className: string;
       } => {
@@ -267,16 +274,16 @@ const StageSummary: React.FC<{ data: Stage6Result }> = ({ data }) => {
     [],
   );
 
-  const chips = [
+  const chips: StageChip[] = [
     {
       label: 'Estágio 1',
       desc: 'Identificação',
-      status: 'ok' as const,
+      status: 'ok',
     },
     {
       label: 'Estágio 2',
       desc: 'Análise',
-      status: 'info' as const,
+      status: 'info',
     },
     {
       label: 'Estágio 3',
@@ -287,27 +294,27 @@ const StageSummary: React.FC<{ data: Stage6Result }> = ({ data }) => {
       label: 'Estágio 4',
       desc: 'Documentação',
       status:
-        data.reprovacoes?.some((i) => i.estagio === 4) === true
-          ? ('error' as const)
-          : 'ok',
+          data.reprovacoes?.some((i) => i.estagio === 4) === true
+            ? 'error'
+            : 'ok',
     },
     {
       label: 'Estágio 5',
       desc: 'Despachos',
       status:
-        data.pendencias_despachos && data.pendencias_despachos.length > 0
-          ? ('info' as const)
-          : 'ok',
+          data.pendencias_despachos && data.pendencias_despachos.length > 0
+            ? 'info'
+            : 'ok',
     },
     {
       label: 'Estágio 6',
       desc: 'Decisão Final',
       status:
         status6 === 'aprovado'
-          ? ('ok' as const)
+          ? 'ok'
           : status6 === 'aprovado_com_ressalva'
-            ? ('warn' as const)
-            : ('error' as const),
+            ? 'warn'
+            : 'error',
     },
   ];
 
