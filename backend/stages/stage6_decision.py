@@ -210,16 +210,37 @@ def collect_issues(
                     )
                 )
             else:
-                motivos = sicaf.get("motivos_reprovacao") or sicaf.get("itens_vencidos") or []
-                detalhes = "; ".join(str(m) for m in motivos) if motivos else "Pendências de regularidade no SICAF."
-                reprovacoes.append(
-                    Stage6Issue(
-                        estagio=4,
-                        tipo="reprovacao",
-                        descricao="SICAF em situação irregular/vencida sem comprovação complementar.",
-                        detalhes=detalhes,
+                # Quando há itens vencidos detalhados, cada um vira uma reprovação separada.
+                itens_vencidos = sicaf.get("itens_vencidos") or []
+                if itens_vencidos:
+                    for item in itens_vencidos:
+                        desc = str(item).strip()
+                        if not desc:
+                            continue
+                        reprovacoes.append(
+                            Stage6Issue(
+                                estagio=4,
+                                tipo="reprovacao",
+                                descricao=desc,
+                                detalhes=None,
+                            )
+                        )
+                else:
+                    # Caso não haja lista de itens vencidos, mantém reprovação genérica.
+                    motivos = sicaf.get("motivos_reprovacao") or []
+                    detalhes = (
+                        "; ".join(str(m) for m in motivos)
+                        if motivos
+                        else "Pendências de regularidade no SICAF."
                     )
-                )
+                    reprovacoes.append(
+                        Stage6Issue(
+                            estagio=4,
+                            tipo="reprovacao",
+                            descricao="SICAF em situação irregular/vencida sem comprovação complementar.",
+                            detalhes=detalhes,
+                        )
+                    )
         elif sicaf_encontrado and sicaf_aprovado:
             pontos_positivos.append("SICAF regular.")
 
@@ -329,8 +350,20 @@ REGRAS DO DESPACHO:
 - Se REPROVADO com múltiplos problemas: usar alíneas (a, b, c) e 
   finalizar com "Solicito a regularização das pendências para 
   prosseguimento"
+- NUNCA dizer que "o processo foi reprovado" ou usar a palavra "reprovado"
+  no texto do despacho. O despacho deve apenas INFORMAR irregularidades,
+  não julgar o processo.
+- Para múltiplos problemas de certidões (ex.: vários itens do SICAF vencidos),
+  agrupar de forma natural, por exemplo:
+  "Informo que as seguintes certidões encontram-se vencidas, o que impede
+  o andamento do processo:
+  a) FGTS, vencida desde 25 FEV 26;
+  b) Receita Municipal, vencida desde 02 MAR 26.
+  Solicito a regularização das pendências para prosseguimento."
 - NÃO incluir cabeçalho, número de despacho ou assinatura
 - NÃO colocar o texto inteiro entre aspas ou crases
+- NÃO retornar sequências de caracteres "\\n" dentro do texto; use quebras
+  de linha reais quando necessário
 - Retornar APENAS o texto do despacho, sem JSON, sem aspas ao redor e 
   sem markdown"""
 
@@ -420,6 +453,9 @@ def generate_dispatch(
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines).strip()
+
+        # Substitui sequências literais "\n" por quebras de linha reais.
+        text = text.replace("\\n", "\n")
 
         # Limpeza adicional: remover aspas ou crases no início/fim, se existirem.
         text = text.strip()

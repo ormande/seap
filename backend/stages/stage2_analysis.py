@@ -154,6 +154,24 @@ Inclua campo "confianca" de 0 a 100.
 """.strip()
 
 
+STAGE2_INSTR_UASG_FALLBACK_PROMPT = """
+Você é um especialista em documentos de licitação do governo brasileiro.
+
+Analise o texto abaixo (primeiras páginas de um processo licitatório) e
+identifique APENAS:
+
+- instrumento_tipo: "Pregão Eletrônico", "Contrato", "Dispensa",
+  "Inexigibilidade" ou "Ata de Registro de Preços"
+- instrumento_numero: número do instrumento no formato "999/9999"
+- uasg: código UASG/UG de 6 dígitos (ex.: 160142)
+
+Retorne APENAS JSON válido no formato:
+{"instrumento_tipo": "...", "instrumento_numero": "...", "uasg": "..."}
+
+Se não encontrar algum campo, use null.
+""".strip()
+
+
 def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
@@ -381,6 +399,169 @@ def extract_instrument_and_uasg(text: str) -> Dict[str, Any]:
                 "codigo": codigo.strip(),
                 "nome": format_om_name(_normalize_whitespace(nome)),
             }
+
+    return {"instrumento": instrumento, "uasg": uasg}
+
+
+def _search_instrument_and_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Busca instrumento (tipo + número) e UASG em TODAS as páginas do processo,
+    usando regex mais abrangentes.
+    """
+    instrumento: Dict[str, Optional[str]] = {"tipo": None, "numero": None}
+    uasg: Dict[str, Optional[str]] = {"codigo": None, "nome": None}
+
+    patterns: List[Tuple[re.Pattern[str], str]] = [
+        (
+            re.compile(
+                r"(Preg[aã]o\s+Eletr[oô]nico)\s*(?:n[º°o\.]|nr\.?|nº|Nº|N°)?\s*\.?\s*(\d+[/-]\d+)",
+                flags=re.IGNORECASE,
+            ),
+            "Pregão Eletrônico",
+        ),
+        (
+            re.compile(
+                r"(Contrato)\s+[Nn][°ºo\.]?\s*\.?\s*(\d+[/-]\d+)",
+                flags=re.IGNORECASE,
+            ),
+            "Contrato",
+        ),
+        (
+            re.compile(
+                r"(Dispensa(?:\s+de\s+Licita[çc][aã]o)?)\s+[Nn][°ºo\.]?\s*\.?\s*(\d+[/-]\d+)",
+                flags=re.IGNORECASE,
+            ),
+            "Dispensa",
+        ),
+        (
+            re.compile(
+                r"(Inexigibilidade)\s+[Nn][°ºo\.]?\s*\.?\s*(\d+[/-]\d+)",
+                flags=re.IGNORECASE,
+            ),
+            "Inexigibilidade",
+        ),
+        (
+            re.compile(
+                r"(Ata\s+de\s+Registro\s+de\s+Pre[çc]os?)\s*[Nn][°ºo\.]?\s*\.?\s*(\d+[/-]\d+)",
+                flags=re.IGNORECASE,
+            ),
+            "Ata de Registro de Preços",
+        ),
+    ]
+
+    page_items: List[Tuple[int, str]] = []
+    for key, text in all_pages.items():
+        if not key.startswith("pagina_"):
+            continue
+        try:
+            idx = int(key.split("_", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        page_items.append((idx, text or ""))
+
+    page_items.sort(key=lambda x: x[0])
+
+    instrumento_page: Optional[int] = None
+
+    for idx, text in page_items:
+        flat = _normalize_for_regex(text)
+        for regex, tipo_label in patterns:
+            m = regex.search(flat)
+            if m:
+                numero = m.group(2).strip()
+                instrumento = {"tipo": tipo_label, "numero": numero}
+                instrumento_page = idx
+                break
+        if instrumento_page is not None:
+            break
+
+    # Busca UASG preferencialmente na mesma página do instrumento; senão, em qualquer página.
+    uasg_patterns = [
+        re.compile(r"UASG\s*[:\-]?\s*(\d{6})", flags=re.IGNORECASE),
+        re.compile(r"UG\s*[:/\-]\s*(\d{6})", flags=re.IGNORECASE),
+    ]
+
+    def _find_uasg_in_text(text: str) -> Optional[str]:
+        for rgx in uasg_patterns:
+            m = rgx.search(text)
+            if m:
+                return m.group(1).strip()
+        return None
+
+    if instrumento_page is not None:
+        text = next((t for (i, t) in page_items if i == instrumento_page), "")
+        codigo = _find_uasg_in_text(text or "")
+        if codigo:
+            uasg["codigo"] = codigo
+
+    if not uasg["codigo"]:
+        for _, text in page_items:
+            codigo = _find_uasg_in_text(text or "")
+            if codigo:
+                uasg["codigo"] = codigo
+                break
+
+    return {"instrumento": instrumento, "uasg": uasg}
+
+
+def _fallback_instrument_and_uasg_with_ai(
+    all_pages: Dict[str, str],
+) -> Dict[str, Any]:
+    """
+    Fallback curto via Gemini usando apenas as 3 primeiras páginas do processo
+    para identificar instrumento e UASG.
+    """
+    page_items: List[Tuple[int, str]] = []
+    for key, text in all_pages.items():
+        if not key.startswith("pagina_"):
+            continue
+        try:
+            idx = int(key.split("_", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        page_items.append((idx, text or ""))
+    page_items.sort(key=lambda x: x[0])
+
+    first_texts = [t for _, t in page_items[:3] if t]
+    if not first_texts:
+        return {}
+
+    combined = "\n\n".join(first_texts)
+
+    try:
+        proc = GeminiProcessor()
+    except ValueError as exc:
+        logger.warning(
+            "Gemini indisponível para fallback de instrumento/UASG no estágio 2: %s",
+            exc,
+        )
+        return {}
+
+    prompt = STAGE2_INSTR_UASG_FALLBACK_PROMPT + "\n\nTEXTO:\n" + combined
+
+    try:
+        result, _, _ = proc._generate(prompt, "stage2_instr_uasg")  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Falha no fallback de instrumento/UASG com IA (estágio 2): %s", exc
+        )
+        return {}
+
+    if not isinstance(result, dict):
+        return {}
+
+    instrumento_tipo = result.get("instrumento_tipo")
+    instrumento_numero = result.get("instrumento_numero")
+    uasg_codigo = result.get("uasg")
+
+    instrumento: Dict[str, Optional[str]] = {
+        "tipo": instrumento_tipo or None,
+        "numero": instrumento_numero or None,
+    }
+    uasg: Dict[str, Optional[str]] = {
+        "codigo": uasg_codigo or None,
+        "nome": None,
+    }
 
     return {"instrumento": instrumento, "uasg": uasg}
 
@@ -772,6 +953,16 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
     instrumento_data = core.get("instrumento") or {}
     uasg_data = core.get("uasg") or {}
 
+    # Se não encontrou instrumento/UASG no tópico da requisição, tenta em TODAS as páginas.
+    if not any(instrumento_data.values()) or not any(uasg_data.values()):
+        broader_core = _search_instrument_and_uasg_all_pages(all_pages)
+        inst_b = broader_core.get("instrumento") or {}
+        uasg_b = broader_core.get("uasg") or {}
+        if not any(instrumento_data.values()) and any(inst_b.values()):
+            instrumento_data = inst_b
+        if not any(uasg_data.values()) and any(uasg_b.values()):
+            uasg_data = uasg_b
+
     tipo_empenho = extract_empenho_type(requisition_text)
 
     items, extracted_by_ai, valor_total_geral, fornecedor_tab, cnpj_tab = extract_items_table(
@@ -857,6 +1048,26 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
                 data.fornecedor = fornecedor_ai
             if not data.cnpj and cnpj_ai:
                 data.cnpj = cnpj_ai
+
+    # Fallback extra: se, mesmo após regex em todas as páginas e fallback geral,
+    # ainda não houver instrumento ou UASG, usa IA curta nas 3 primeiras páginas.
+    if (not data.instrumento or not data.instrumento.tipo or not data.instrumento.numero) or (
+        not data.uasg or not data.uasg.codigo
+    ):
+        fb_core = _fallback_instrument_and_uasg_with_ai(all_pages)
+        if fb_core:
+            inst_fb = fb_core.get("instrumento") or {}
+            uasg_fb = fb_core.get("uasg") or {}
+            if (not data.instrumento or not data.instrumento.tipo or not data.instrumento.numero) and inst_fb:
+                data.instrumento = Stage2Instrument(
+                    tipo=inst_fb.get("tipo"),
+                    numero=inst_fb.get("numero"),
+                )
+            if (not data.uasg or not data.uasg.codigo) and uasg_fb:
+                data.uasg = Stage2UASG(
+                    codigo=uasg_fb.get("codigo"),
+                    nome=uasg_fb.get("nome"),
+                )
 
     confidence = _compute_confidence(data, ai_conf=ai_conf)
 
