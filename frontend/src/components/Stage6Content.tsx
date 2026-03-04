@@ -231,6 +231,11 @@ const StageSummary: React.FC<{ data: Stage6Result }> = ({ data }) => {
     status: StageStatus;
   };
 
+  const hasStage4Reprovacao =
+    data.reprovacoes?.some((i) => i.estagio === 4) === true;
+  const hasStage4Ressalva =
+    data.ressalvas?.some((i) => i.estagio === 4) === true;
+
   const iconFor = useMemo(
     () =>
       (value: StageStatus): {
@@ -294,9 +299,7 @@ const StageSummary: React.FC<{ data: Stage6Result }> = ({ data }) => {
       label: 'Estágio 4',
       desc: 'Documentação',
       status:
-          data.reprovacoes?.some((i) => i.estagio === 4) === true
-            ? 'error'
-            : 'ok',
+        hasStage4Reprovacao ? 'error' : hasStage4Ressalva ? 'warn' : 'ok',
     },
     {
       label: 'Estágio 5',
