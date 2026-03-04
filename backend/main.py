@@ -20,18 +20,20 @@ except ImportError:
 try:
     from .database import (
         delete_analysis,
-        get_all_analyses,
-        get_analysis_by_id,
+        get_analysis,
+        get_or_create_user,
+        get_user_analyses,
         init_db,
-        insert_analysis,
+        save_analysis,
     )
 except ImportError:
     from database import (
         delete_analysis,
-        get_all_analyses,
-        get_analysis_by_id,
+        get_analysis,
+        get_or_create_user,
+        get_user_analyses,
         init_db,
-        insert_analysis,
+        save_analysis,
     )
 
 try:
@@ -114,10 +116,19 @@ app.add_middleware(
 )
 
 
+def get_current_user(request: Request) -> Dict[str, str]:
+    """Extrai informações básicas do usuário a partir dos headers enviados pelo frontend."""
+    return {
+        "email": request.headers.get("X-User-Email", "anonymous"),
+        "name": request.headers.get("X-User-Name", "Anônimo"),
+        "user_id": request.headers.get("X-User-Id", "anonymous"),
+    }
+
+
 @app.on_event("startup")
-def on_startup() -> None:
-    """Cria a tabela de análises no SQLite se não existir."""
-    init_db()
+async def on_startup() -> None:
+    """Inicializa o banco de dados PostgreSQL."""
+    await init_db()
 
 
 @app.post("/api/extract", response_model=ExtractionResult)
@@ -628,42 +639,50 @@ class SaveAnalysisResponse(BaseModel):
 
 
 @app.post("/api/analyses", response_model=SaveAnalysisResponse)
-async def save_analysis(body: SaveAnalysisRequest) -> SaveAnalysisResponse:
+async def save_analysis_endpoint(
+    request: Request,
+    body: SaveAnalysisRequest,
+) -> SaveAnalysisResponse:
     """
-    Salva uma análise no histórico (SQLite).
+    Salva uma análise no histórico, vinculada ao usuário autenticado.
     Recebe o resultado completo dos estágios e o tempo de análise.
     """
-    analysis_id = await asyncio.to_thread(
-        insert_analysis,
-        body.dados_completos,
-        body.tempo_analise,
-        body.data_analise,
+    user = get_current_user(request)
+    await get_or_create_user(user["user_id"], user["email"], user["name"])
+    analysis_id = await save_analysis(
+        user_id=user["user_id"],
+        dados_completos=body.dados_completos,
+        tempo_analise_sec=body.tempo_analise,
+        data_analise_iso=body.data_analise,
     )
     return SaveAnalysisResponse(id=analysis_id, success=True)
 
 
 @app.get("/api/analyses")
-async def list_analyses() -> list[Dict[str, Any]]:
+async def list_analyses(request: Request) -> list[Dict[str, Any]]:
     """
-    Lista todas as análises salvas (sem dados_completos).
-    Ordenado por data_analise desc.
+    Lista todas as análises salvas do usuário autenticado (sem dados_completos),
+    ordenadas por data_analise desc.
     """
-    return await asyncio.to_thread(get_all_analyses)
+    user = get_current_user(request)
+    return await get_user_analyses(user["user_id"])
 
 
 @app.get("/api/analyses/{analysis_id}")
-async def get_analysis(analysis_id: str) -> Dict[str, Any]:
-    """Retorna uma análise completa com dados_completos."""
-    result = await asyncio.to_thread(get_analysis_by_id, analysis_id)
+async def get_analysis_endpoint(analysis_id: str, request: Request) -> Dict[str, Any]:
+    """Retorna uma análise completa com dados_completos, se pertencer ao usuário."""
+    user = get_current_user(request)
+    result = await get_analysis(analysis_id, user["user_id"])
     if result is None:
         raise HTTPException(status_code=404, detail="Análise não encontrada.")
     return result
 
 
 @app.delete("/api/analyses/{analysis_id}")
-async def remove_analysis(analysis_id: str) -> Dict[str, Any]:
-    """Remove uma análise do banco."""
-    deleted = await asyncio.to_thread(delete_analysis, analysis_id)
+async def remove_analysis(analysis_id: str, request: Request) -> Dict[str, Any]:
+    """Remove uma análise do banco, se pertencer ao usuário."""
+    user = get_current_user(request)
+    deleted = await delete_analysis(analysis_id, user["user_id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Análise não encontrada.")
     return {"success": True, "id": analysis_id}

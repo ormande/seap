@@ -12,6 +12,7 @@ import {
   SunMedium,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { signOut, useSession } from "next-auth/react";
 
 type NavItem = {
   label: string;
@@ -36,7 +37,9 @@ export function Sidebar() {
   const pathname = usePathname();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
-   const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const { data: session } = useSession();
+  const user = session?.user;
 
   useEffect(() => {
     setMounted(true);
@@ -128,8 +131,47 @@ export function Sidebar() {
           );
         })}
       </nav>
+      <div className="border-t border-[var(--border-subtle)]/80 px-3 py-3 space-y-3">
+        {user && (
+          <div className="flex items-center justify-between gap-2 rounded-xl bg-[var(--bg-card)] px-2 py-2 text-xs text-[var(--text-secondary)] shadow-sm">
+            <div className="flex items-center gap-2 overflow-hidden">
+              {user.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.image}
+                  alt={user.name ?? "Usuário"}
+                  className="h-8 w-8 flex-shrink-0 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600 dark:bg-emerald-500/30 dark:text-emerald-200">
+                  <span className="text-xs font-semibold">
+                    {(user.name ?? user.email ?? "?").slice(0, 1).toUpperCase()}
+                  </span>
+                </div>
+              )}
+              {!collapsed && (
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] font-semibold text-[var(--text-primary)]">
+                    {user.name ?? "Usuário"}
+                  </p>
+                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                    {user.email ?? ""}
+                  </p>
+                </div>
+              )}
+            </div>
+            {!collapsed && (
+              <button
+                type="button"
+                onClick={() => signOut({ callbackUrl: "/login" })}
+                className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-emerald-600 transition hover:bg-emerald-500/10 dark:text-emerald-200"
+              >
+                Sair
+              </button>
+            )}
+          </div>
+        )}
 
-      <div className="border-t border-[var(--border-subtle)]/80 px-3 py-3">
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}

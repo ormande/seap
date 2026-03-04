@@ -29,6 +29,15 @@ export function AppShell({ children }: Props) {
   const pathname = usePathname();
   const { title, description, icon: Icon } = getPageMeta(pathname);
 
+  // Página de login: layout limpo, sem sidebar nem header.
+  if (pathname === "/login") {
+    return (
+      <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)]">
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)]">
       <Sidebar />

@@ -19,7 +19,7 @@ import { Stage4Content } from '../components/analysis/Stage4Content';
 import { Stage5Content } from '../components/analysis/Stage5Content';
 import { Stage6Content } from '../components/Stage6Content';
 import { PdfUpload } from '../components/upload/PdfUpload';
-import { API_URL, saveAnalysis } from '../lib/api';
+import { fetchAPI, saveAnalysis } from '../lib/api';
 import type { AnalyzeResult } from '../types/extraction';
 
 function formatTimer(seconds: number): string {
@@ -149,7 +149,7 @@ export default function HomePage() {
     abortControllerRef.current = controller;
 
     try {
-      const response = await fetch(`${API_URL}/api/analyze`, {
+      const response = await fetchAPI('/api/analyze', {
         method: 'POST',
         body: formData,
         signal: controller.signal,

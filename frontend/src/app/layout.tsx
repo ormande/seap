@@ -3,6 +3,7 @@ import { Comfortaa } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "../components/theme/ThemeProvider";
 import { AppShell } from "../components/layout/AppShell";
+import AuthProvider from "../components/AuthProvider";
 
 const comfortaa = Comfortaa({
   variable: "--font-comfortaa",
@@ -23,9 +24,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <body className={`${comfortaa.variable} font-sans antialiased`}>
-        <ThemeProvider>
-          <AppShell>{children}</AppShell>
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <AppShell>{children}</AppShell>
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );
