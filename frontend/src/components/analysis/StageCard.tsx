@@ -14,6 +14,7 @@ type StageCardProps = {
   subtitle?: string;
   disabled?: boolean;
   confidence?: number | null;
+  statusOverride?: 'ok' | 'warn' | 'error' | 'info' | 'none';
   defaultOpen?: boolean;
   children?: React.ReactNode;
 };
@@ -23,6 +24,7 @@ export const StageCard: React.FC<StageCardProps> = ({
   subtitle,
   disabled = false,
   confidence,
+  statusOverride,
   defaultOpen = true,
   children,
 }) => {
@@ -34,7 +36,25 @@ export const StageCard: React.FC<StageCardProps> = ({
   let statusColor =
     'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200';
 
-  if (!disabled && typeof confidence === 'number') {
+  if (!disabled && statusOverride && statusOverride !== 'none') {
+    if (statusOverride === 'ok') {
+      statusIcon = <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+      statusColor =
+        'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200';
+    } else if (statusOverride === 'warn') {
+      statusIcon = <AlertTriangle className="h-4 w-4 text-amber-500" />;
+      statusColor =
+        'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200';
+    } else if (statusOverride === 'error') {
+      statusIcon = <XCircle className="h-4 w-4 text-rose-500" />;
+      statusColor =
+        'bg-rose-50 text-rose-800 dark:bg-rose-500/10 dark:text-rose-200';
+    } else if (statusOverride === 'info') {
+      statusIcon = <AlertTriangle className="h-4 w-4 text-sky-500" />;
+      statusColor =
+        'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-200';
+    }
+  } else if (!disabled && typeof confidence === 'number') {
     if (confidence > 85) {
       statusIcon = <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
       statusColor =

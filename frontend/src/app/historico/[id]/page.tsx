@@ -142,6 +142,13 @@ export default function HistoricoDetailPage() {
   const stage6 = (result.stages?.stage6 as any) ?? null;
   const metadata = result.metadata ?? { total_paginas: 0, paginas_com_texto: 0 };
 
+  const hasStage4Reprovacao =
+    stage6?.reprovacoes?.some((i: any) => i.estagio === 4) === true;
+  const hasStage4Ressalva =
+    stage6?.ressalvas?.some((i: any) => i.estagio === 4) === true;
+  const stage4StatusOverride: 'ok' | 'warn' | 'error' | 'none' =
+    hasStage4Reprovacao ? 'error' : hasStage4Ressalva ? 'warn' : 'ok';
+
   return (
     <div className="space-y-4">
       {toast && (
@@ -289,6 +296,7 @@ export default function HistoricoDetailPage() {
           title="Estágio 4 — Documentação"
           subtitle="CADIN, TCU, SICAF e cruzamento de CNPJ"
           confidence={stage4?.confidence?.geral ?? null}
+          statusOverride={stage4 ? stage4StatusOverride : 'none'}
           defaultOpen={false}
         >
           {stage4 ? (
