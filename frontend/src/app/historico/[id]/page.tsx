@@ -62,6 +62,26 @@ export default function HistoricoDetailPage() {
     setError(null);
     try {
       const data = await getAnalysisById(id);
+      // Debug em desenvolvimento
+      if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.log('[HISTORICO] Dados recebidos:', data);
+        // eslint-disable-next-line no-console
+        console.log(
+          '[HISTORICO] Stage1:',
+          (data as any)?.dados_completos?.stages?.stage1,
+        );
+      }
+      // Garante que dados_completos seja objeto
+      if (typeof (data as any).dados_completos === 'string') {
+        try {
+          (data as any).dados_completos = JSON.parse(
+            (data as any).dados_completos as string,
+          );
+        } catch {
+          (data as any).dados_completos = {} as any;
+        }
+      }
       setAnalysis(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao carregar análise');

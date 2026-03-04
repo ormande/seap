@@ -648,6 +648,26 @@ async def save_analysis_endpoint(
     Recebe o resultado completo dos estágios e o tempo de análise.
     """
     user = get_current_user(request)
+
+    # Logs de depuração do payload recebido.
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    logger.info("[SAVE] Análise recebida do usuário %s", user.get("user_id"))
+    if isinstance(raw, dict):
+        logger.info("[SAVE] Payload keys: %s", list(raw.keys()))
+        logger.info(
+            "[SAVE] Campos raiz: nup=%s veredicto=%s",
+            raw.get("dados_completos", {}).get("stages", {})
+            .get("stage1", {})
+            .get("data", {})
+            .get("nup"),
+            raw.get("dados_completos", {}).get("stages", {})
+            .get("stage6", {})
+            .get("status"),
+        )
+
     await get_or_create_user(user["user_id"], user["email"], user["name"])
     analysis_id = await save_analysis(
         user_id=user["user_id"],
@@ -675,6 +695,15 @@ async def get_analysis_endpoint(analysis_id: str, request: Request) -> Dict[str,
     result = await get_analysis(analysis_id, user["user_id"])
     if result is None:
         raise HTTPException(status_code=404, detail="Análise não encontrada.")
+
+    # Loga o tipo de dados_completos para depuração.
+    dados = result.get("dados_completos")
+    logger.info(
+        "[LOAD] Análise %s carregada para usuário %s. dados_completos type=%s",
+        analysis_id,
+        user.get("user_id"),
+        type(dados),
+    )
     return result
 
 

@@ -42,3 +42,42 @@ body {
   background-color: var(--bg-main);
   color: var(--text-primary);
 }
+
+@keyframes toast-slide-down {
+  from {
+    transform: translate(-50%, -100%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-up {
+  from {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, -100%);
+    opacity: 0;
+  }
+}
+
+@keyframes toast-scale-in {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+.animate-toast-slide-down {
+  animation: toast-slide-down 0.25s ease-out;
+}
+
+.animate-toast-scale-in {
+  animation: toast-scale-in 0.2s ease-out;
+}

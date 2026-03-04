@@ -277,6 +277,14 @@ async def get_analysis(analysis_id: str, user_id: str) -> Optional[Dict[str, Any
         raw = d.get("dados_completos")
         if raw is None:
             d["dados_completos"] = {}
+        elif isinstance(raw, str):
+            # Compatibilidade: se alguma linha antiga tiver JSON como string.
+            try:
+                d["dados_completos"] = json.loads(raw)
+            except json.JSONDecodeError:
+                d["dados_completos"] = {}
+        else:
+            d["dados_completos"] = raw
         return d
 
 

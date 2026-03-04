@@ -19,6 +19,7 @@ import { Stage4Content } from '../components/analysis/Stage4Content';
 import { Stage5Content } from '../components/analysis/Stage5Content';
 import { Stage6Content } from '../components/Stage6Content';
 import { PdfUpload } from '../components/upload/PdfUpload';
+import { Toast } from '../components/Toast';
 import { fetchAPI, saveAnalysis } from '../lib/api';
 import type { AnalyzeResult } from '../types/extraction';
 
@@ -237,13 +238,9 @@ export default function HomePage() {
     try {
       await saveAnalysis(result, elapsedSeconds);
       setToast('Análise salva com sucesso');
-      setTimeout(() => {
-        setToast(null);
-        router.push('/historico');
-      }, 3000);
+      // Toast controla a animação de saída e o fechamento; após fechar limpamos o estado.
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Erro ao salvar');
-      setTimeout(() => setToast(null), 3000);
     }
   };
 
@@ -371,9 +368,18 @@ export default function HomePage() {
   return (
     <div className="space-y-4">
       {toast && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-emerald-500/40 bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-emerald-600/95">
-          {toast}
-        </div>
+        <Toast
+          message={toast}
+          durationMs={3000}
+          onClose={() => {
+            // Após o toast sumir, limpamos o estado e voltamos para a tela inicial
+            if (toast === 'Análise salva com sucesso') {
+              resetState();
+              router.push('/');
+            }
+            setToast(null);
+          }}
+        />
       )}
 
       <ConfirmModal
