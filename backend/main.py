@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Annotated, Any, Dict
@@ -35,6 +36,8 @@ except ImportError:
         init_db,
         save_analysis,
     )
+
+logger = logging.getLogger(__name__)
 
 try:
     from .extractor import extract_all_pages, extract_with_anchors
