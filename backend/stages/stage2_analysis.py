@@ -38,11 +38,18 @@ except Exception as e1:
         extract_table_text_with_azure = None  # type: ignore[assignment]
 
 try:
-    from ..extractor import get_pages_with_large_images, page_to_base64
-except ImportError as e:
-    print(f"STAGE2 DEBUG CRÍTICO | Falha ao importar funções extras do extractor: {e}", flush=True)
-    get_pages_with_large_images = None  # type: ignore[assignment]
-    page_to_base64 = None  # type: ignore[assignment]
+    from extractor import get_pages_with_large_images, page_to_base64
+except Exception as e1:
+    try:
+        from ..extractor import get_pages_with_large_images, page_to_base64
+    except Exception as e2:
+        print(f"\n{'='*50}", flush=True)
+        print("STAGE2 DEBUG CRÍTICO | FALHA TOTAL AO IMPORTAR EXTRACTOR!", flush=True)
+        print(f"Erro Absoluto: {e1}", flush=True)
+        print(f"Erro Relativo: {e2}", flush=True)
+        print(f"{'='*50}\n", flush=True)
+        get_pages_with_large_images = None  # type: ignore[assignment]
+        page_to_base64 = None  # type: ignore[assignment]
 
 try:
     from ..models import (
