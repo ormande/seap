@@ -22,7 +22,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -680,28 +681,28 @@ def _call_gemini_vision_with_fallback(
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY não definida.")
-    genai.configure(api_key=api_key)
-    time.sleep(2)  # Rate limiting para não estourar limite por minuto
-    content: List[Any] = [prompt]
+    client = genai.Client(api_key=api_key)
+    time.sleep(2)  # Rate limiting
+    content_parts: List[Any] = [types.Part.from_text(text=prompt)]
     if images_base64:
         for img_b64 in images_base64:
             if not img_b64:
                 continue
             img_bytes = base64.b64decode(img_b64)
-            content.append(
-                {"inline_data": {"mime_type": "image/png", "data": img_bytes}}
+            content_parts.append(
+                types.Part.from_bytes(data=img_bytes, mime_type="image/png")
             )
     last_error: Optional[Exception] = None
     for model_name in MODELS_FALLBACK:
         try:
-            model = genai.GenerativeModel(
-                model_name,
-                generation_config=genai.GenerationConfig(
+            response = client.models.generate_content(
+                model=model_name,
+                contents=content_parts,
+                config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.1,
                 ),
             )
-            response = model.generate_content(content)
             text = (response.text or "").strip()
             if text:
                 return text
@@ -709,7 +710,7 @@ def _call_gemini_vision_with_fallback(
             last_error = exc
             if "429" in str(exc):
                 print(
-                    f"[Stage3] {model_name} quota excedida, tentando próximo modelo..."
+                    f"[Stage3] {model_name} quota excedida, tentando próximo..."
                 )
                 logger.warning("Gemini 429 ao usar %s: %s", model_name, exc)
                 continue

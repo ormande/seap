@@ -10,7 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 # Carrega .env do diretório backend (ou raiz do projeto).
@@ -86,14 +87,7 @@ class GeminiProcessor:
             raise ValueError(
                 "GEMINI_API_KEY não definida. Configure no .env ou passe api_key."
             )
-        genai.configure(api_key=key)
-        self._model = genai.GenerativeModel(
-            self.MODEL_NAME,
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.1,
-            ),
-        )
+        self._client = genai.Client(api_key=key)
 
     def _generate(self, prompt: str, operation: str) -> tuple[dict[str, Any], int, int]:
         """
@@ -101,19 +95,19 @@ class GeminiProcessor:
         Aplica retry exponencial e log de custo.
         """
         def _call() -> Any:
-            response = self._model.generate_content(prompt)
-            return response
+            return self._client.models.generate_content(
+                model=self.MODEL_NAME,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
 
         response = _retry_with_backoff(lambda: _call())
-        usage = getattr(response, "usage_metadata", None) or {}
-        input_tokens = getattr(usage, "prompt_token_count", None) or 0
-        output_tokens = getattr(usage, "candidates_token_count", None) or (
-            getattr(usage, "total_token_count", None) or 0
-        )
-        if output_tokens == 0 and hasattr(response, "candidates") and response.candidates:
-            output_tokens = (
-                getattr(response.candidates[0], "token_count", None) or 0
-            )
+        usage = getattr(response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
         _log_token_usage(input_tokens, output_tokens, operation)
 
         text = (response.text or "").strip()
@@ -128,6 +122,23 @@ class GeminiProcessor:
                 lines = lines[:-1]
             text = "\n".join(lines)
         return json.loads(text), input_tokens, output_tokens
+
+    def generate_text(self, prompt: str, operation: str = "text") -> str:
+        """Gera texto puro (sem forçar JSON)."""
+        def _call() -> Any:
+            return self._client.models.generate_content(
+                model=self.MODEL_NAME,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                ),
+            )
+        response = _retry_with_backoff(lambda: _call())
+        usage = getattr(response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        _log_token_usage(input_tokens, output_tokens, operation)
+        return (response.text or "").strip()
 
     def structure_header(self, texto: str) -> dict[str, Any]:
         """

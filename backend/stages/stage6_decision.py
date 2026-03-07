@@ -462,11 +462,7 @@ def generate_dispatch(
         return ""
 
     try:
-        # Aqui esperamos texto puro, não JSON, então chamamos o modelo diretamente.
-        response = proc._model.generate_content(  # type: ignore[attr-defined]
-            prompt
-        )
-        text = (getattr(response, "text", None) or "").strip()
+        text = proc.generate_text(prompt, operation="stage6_dispatch")
 
         # Remove possíveis blocos ```markdown``` que o modelo possa ter incluído.
         if text.startswith("```"):
