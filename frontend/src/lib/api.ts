@@ -123,3 +123,22 @@ export async function deleteAnalysis(id: string): Promise<{ success: boolean }> 
   const json = (await res.json()) as { success?: boolean };
   return { success: json.success ?? true };
 }
+
+/** Adiciona uma UASG ao banco do sistema (quando não reconhecida). */
+export async function addUASG(
+  codigo: string,
+  nome: string,
+): Promise<{ success: boolean; codigo: string; nome: string }> {
+  const res = await fetchAPI('/api/uasgs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ codigo: codigo.trim(), nome: nome.trim() }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `Erro ao cadastrar UASG (status ${res.status}): ${text || res.statusText}`,
+    );
+  }
+  return (await res.json()) as { success: boolean; codigo: string; nome: string };
+}

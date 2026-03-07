@@ -3,6 +3,7 @@ Módulo de IA para estruturação de dados extraídos de PDFs de licitações
 usando Google Gemini 2.5 Flash.
 """
 
+import base64
 import json
 import logging
 import os
@@ -80,6 +81,7 @@ class GeminiProcessor:
     """
 
     MODEL_NAME = "gemini-2.5-flash"
+    VISION_MODEL_NAME = "gemini-2.5-pro"
 
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or os.getenv("GEMINI_API_KEY")
@@ -114,6 +116,52 @@ class GeminiProcessor:
         if not text:
             return {}, input_tokens, output_tokens
         # Remove possíveis blocos markdown ```json ... ```
+        if text.startswith("```"):
+            lines = text.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines)
+        return json.loads(text), input_tokens, output_tokens
+
+    def _generate_with_images(
+        self, prompt: str, images_base64: list[str], operation: str
+    ) -> tuple[dict[str, Any], int, int]:
+        """
+        Igual ao _generate, mas envia texto + imagens ao modelo.
+        Usa types.Part.from_text e types.Part.from_bytes para montar o contents.
+        """
+        content_parts = [types.Part.from_text(text=prompt)]
+        for b64 in images_base64:
+            if not b64:
+                continue
+            content_parts.append(
+                types.Part.from_bytes(
+                    data=base64.b64decode(b64),
+                    mime_type="image/png",
+                )
+            )
+
+        def _call() -> Any:
+            return self._client.models.generate_content(
+                model=self.VISION_MODEL_NAME,
+                contents=content_parts,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
+
+        response = _retry_with_backoff(lambda: _call())
+        usage = getattr(response, "usage_metadata", None)
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        _log_token_usage(input_tokens, output_tokens, operation)
+
+        text = (response.text or "").strip()
+        if not text:
+            return {}, input_tokens, output_tokens
         if text.startswith("```"):
             lines = text.split("\n")
             if lines[0].startswith("```"):

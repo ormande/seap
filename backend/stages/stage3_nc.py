@@ -1079,6 +1079,46 @@ def run(
             else:
                 nc_raw = _extract_with_ai(nc_text)
 
+        # Fallback Vision se extração por texto falhou ou retornou sem dados úteis
+        if not nc_raw or (not nc_raw.get("numero_nc") and not nc_raw.get("destinos")):
+            if pdf_path:
+                print(
+                    f"[Stage3] Extração por texto insuficiente para páginas {group_pages}. Tentando Vision..."
+                )
+                images_b64 = []
+                for p in group_pages:
+                    img = page_to_base64(pdf_path, p)
+                    if img:
+                        images_b64.append(img)
+                if images_b64:
+                    nc_text_for_vision = "\n".join(
+                        (all_pages.get(f"pagina_{p}", "") or "") for p in group_pages
+                    )
+                    vision_prompt = (
+                        STAGE3_PROMPT
+                        + "\n\nTEXTO DA NOTA DE CRÉDITO:\n"
+                        + nc_text_for_vision
+                    )
+                    vision_text = _call_gemini_vision_with_fallback(
+                        vision_prompt, images_base64=images_b64
+                    )
+                    if vision_text:
+                        try:
+                            if vision_text.startswith("```"):
+                                lines = vision_text.split("\n")
+                                if lines[0].startswith("```"):
+                                    lines = lines[1:]
+                                if lines and lines[-1].strip() == "```":
+                                    lines = lines[:-1]
+                                vision_text = "\n".join(lines)
+                            nc_raw = json.loads(vision_text)
+                            _apply_deduplication_and_recalc(nc_raw)
+                            print(
+                                f"[Stage3] Vision extraiu NC com sucesso para páginas {group_pages}"
+                            )
+                        except (json.JSONDecodeError, Exception) as exc:  # noqa: BLE001
+                            print(f"[Stage3] Falha no parse do Vision: {exc}")
+
         if not nc_raw:
             continue
 

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import traceback
 from pathlib import Path
 from typing import Annotated, Any, Dict
 
@@ -20,7 +21,9 @@ except ImportError:
 
 try:
     from .database import (
+        add_uasg as db_add_uasg,
         delete_analysis,
+        get_all_uasgs,
         get_analysis,
         get_or_create_user,
         get_user_analyses,
@@ -29,13 +32,20 @@ try:
     )
 except ImportError:
     from database import (
+        add_uasg as db_add_uasg,
         delete_analysis,
+        get_all_uasgs,
         get_analysis,
         get_or_create_user,
         get_user_analyses,
         init_db,
         save_analysis,
     )
+
+try:
+    from .uasg_store import load_uasg_cache_from_dict, set_uasg_in_cache
+except ImportError:
+    from uasg_store import load_uasg_cache_from_dict, set_uasg_in_cache
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +140,14 @@ def get_current_user(request: Request) -> Dict[str, str]:
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    """Inicializa o banco de dados PostgreSQL."""
+    """Inicializa o banco de dados PostgreSQL e o cache de UASGs."""
     await init_db()
+    try:
+        uasgs = await get_all_uasgs()
+        load_uasg_cache_from_dict({r["codigo"]: r["nome"] for r in uasgs})
+        logger.info("Cache de UASGs carregado: %s registro(s).", len(uasgs))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Não foi possível carregar UASGs no cache: %s", e)
 
 
 @app.post("/api/extract", response_model=ExtractionResult)
@@ -458,6 +474,7 @@ async def analyze_pdf(
                 stage2_analysis.run,
                 pages,
                 str(temp_path),
+                image_pages,
             )
             stage2_result = Stage2Result(**stage2_raw)
 
@@ -600,6 +617,8 @@ async def analyze_pdf(
             }
             yield f"data: {json.dumps(error_payload)}\n\n"
         except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            print(f"MAIN DEBUG | Erro completo: {exc}", flush=True)
             error_payload = {
                 "phase": "error",
                 "progress": 100,
@@ -718,6 +737,46 @@ async def remove_analysis(analysis_id: str, request: Request) -> Dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="Análise não encontrada.")
     return {"success": True, "id": analysis_id}
+
+
+# --- UASGs (banco de códigos/nomes para reconhecimento) ---
+
+
+class AddUASGRequest(BaseModel):
+    """Payload para POST /api/uasgs."""
+
+    codigo: str = Field(..., min_length=1, description="Código UASG (6 dígitos, ex.: 160142).")
+    nome: str = Field(..., min_length=1, description="Nome da OM/organização.")
+
+
+@app.post("/api/uasgs")
+async def add_uasg_endpoint(body: AddUASGRequest) -> Dict[str, Any]:
+    """
+    Adiciona ou atualiza uma UASG no banco do sistema.
+    Quando a UASG não é reconhecida na análise, o frontend pode enviar o nome
+    preenchido pelo usuário para que passe a ser reconhecida nas próximas análises.
+    """
+    codigo = (body.codigo or "").strip()
+    nome = (body.nome or "").strip()
+    if not codigo or not nome:
+        raise HTTPException(
+            status_code=400,
+            detail="Código e nome são obrigatórios.",
+        )
+    if len(codigo) != 6 or not codigo.isdigit():
+        raise HTTPException(
+            status_code=400,
+            detail="Código UASG deve ter 6 dígitos numéricos.",
+        )
+    await db_add_uasg(codigo, nome)
+    set_uasg_in_cache(codigo, nome)
+    return {"success": True, "codigo": codigo, "nome": nome}
+
+
+@app.get("/api/uasgs")
+async def list_uasgs() -> list[Dict[str, Any]]:
+    """Lista todas as UASGs cadastradas (para consulta ou debug)."""
+    return await get_all_uasgs()
 
 
 if __name__ == "__main__":

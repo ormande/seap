@@ -11,7 +11,10 @@ Responsável por:
 from __future__ import annotations
 
 import logging
+import os
 import re
+import sys
+import traceback
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,6 +23,26 @@ try:
     from ..ai_processor import GeminiProcessor
 except ImportError:
     from ai_processor import GeminiProcessor
+
+try:
+    from azure_processor import extract_table_text_with_azure
+except Exception as e1:
+    try:
+        from ..azure_processor import extract_table_text_with_azure
+    except Exception as e2:
+        print(f"\n{'='*50}", flush=True)
+        print("STAGE2 DEBUG CRÍTICO | FALHA TOTAL AO IMPORTAR AZURE_PROCESSOR!", flush=True)
+        print(f"Erro Absoluto: {e1}", flush=True)
+        print(f"Erro Relativo: {e2}", flush=True)
+        print(f"{'='*50}\n", flush=True)
+        extract_table_text_with_azure = None  # type: ignore[assignment]
+
+try:
+    from ..extractor import get_pages_with_large_images, page_to_base64
+except ImportError as e:
+    print(f"STAGE2 DEBUG CRÍTICO | Falha ao importar funções extras do extractor: {e}", flush=True)
+    get_pages_with_large_images = None  # type: ignore[assignment]
+    page_to_base64 = None  # type: ignore[assignment]
 
 try:
     from ..models import (
@@ -65,13 +88,8 @@ CANDIDATE_UASG_FLEX_REGEX = re.compile(
     flags=re.IGNORECASE,
 )
 
-UASG_TO_OM = {
-    "160131": "9º Batalhão de Comunicações e Guerra Eletrônica",
-    "160132": "3ª Companhia de Comunicações Leve",
-    "160134": "9º Depósito de Suprimento",
-    "160136": "9º Grupamento Logístico",
-    "160516": "18º Batalhão de Transporte",
-}
+# Fallback quando o cache (banco) ainda não tiver a UASG.
+UASG_TO_OM: Dict[str, str] = {}
 
 CNPJ_STRICT_REGEX = re.compile(
     r"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$",
@@ -84,52 +102,47 @@ REQ_ANCHOR_REGEX = re.compile(
 
 
 STAGE2_TABLE_PROMPT = """
-Você é um especialista em extração de tabelas de documentos de licitação do Exército Brasileiro.
+Você é um auditor militar especialista em extração de tabelas de licitação.
 
-Analise este TEXTO ou IMAGEM de tabela de itens de uma requisição militar e extraia
-TODOS os itens no seguinte formato JSON:
+Analise a IMAGEM ou TEXTO da tabela de itens e extraia os dados com precisão absoluta.
+Como tabelas escaneadas podem ser confusas, você DEVE seguir este processo de raciocínio lógico no campo "raciocinio_matematico" ANTES de preencher os itens:
+
+Para CADA linha da tabela:
+1. Leia a Quantidade (QTD).
+2. Leia o Valor Unitário (VU).
+3. Leia o Valor Total (VT) que está escrito na imagem.
+4. Multiplique QTD * VU.
+5. Se o resultado da sua multiplicação for diferente do VT escrito na imagem (com tolerância de R$ 0,02), VOCÊ LEU ALGUM NÚMERO ERRADO. Olhe novamente para a imagem com mais cuidado, aproxime a visão e corrija sua leitura até a matemática bater perfeitamente.
+
+Retorne APENAS um objeto JSON válido neste exato formato:
 
 {
-  "fornecedor": "nome da empresa",
-  "cnpj": "XX.XXX.XXX/XXXX-XX",
+  "raciocinio_matematico": [
+    "Item 1: Lidos QTD=10 e VU=2.50. Calculado 10*2.50=25.00. Escrito na imagem=25.00. Bateu perfeitamente.",
+    "Item 2: Lidos QTD=5 e VU=10.00. Calculado 5*10=50. Escrito na imagem=80.00. ERRO. Relendo a imagem... Ah, a QTD correta é 8. 8*10=80.00. Corrigido."
+  ],
+  "fornecedor": "nome da empresa ou null",
+  "cnpj": "XX.XXX.XXX/XXXX-XX ou null",
   "itens": [
     {
       "item": 1,
-      "catmat": "código",
-      "descricao": "descrição do material/serviço",
-      "unidade": "und/kg/svc/m",
-      "quantidade": 0,
-      "nd_si": "classificação",
-      "valor_unitario": 0.00,
-      "valor_total": 0.00
+      "catmat": "código ou null",
+      "descricao": "descrição",
+      "unidade": "und",
+      "quantidade": 10,
+      "nd_si": "30.24",
+      "valor_unitario": 2.50,
+      "valor_total": 25.00
     }
   ],
-  "valor_total_geral": 0.00
+  "valor_total_geral": 25.00
 }
 
-REGRAS IMPORTANTES:
-- NUNCA confunda NUP com CNPJ. NUP tem padrão XXXXX.XXXXXX/XXXX-XX (5.6/4-2 dígitos),
-  enquanto CNPJ tem SEMPRE 14 dígitos com formato XX.XXX.XXX/XXXX-XX.
-- Para CNPJ, use SEMPRE o formato XX.XXX.XXX/XXXX-XX (14 dígitos) e não utilize números
-  de processo/NUP como se fossem CNPJ.
-- O campo CatMat/CatServ (catmat) deve conter APENAS números (sem letras, hífens ou sufixos como 'Sv').
-- O campo "unidade" (UND) é TEXTO (ex.: Sv, Un, Kg, M, M², L, Pç). NÃO remova letras deste campo.
-  Apenas os campos "item" e "catmat" devem conter somente números.
-- O campo ND/SI pode aparecer em múltiplos formatos. Normalize sempre para EE.SS (elemento.subelemento),
-  por exemplo "30.24". Exemplos de normalização:
-  * '30.24' -> '30.24'
-  * '30/04' -> '30.04'
-  * '33.90.30.34' -> '30.34'
-  * '33.90.39/17' -> '39.17'
-  * '4490.52.08' -> '52.08'
-  * '33.9\\n0.39/\\n24' -> '39.24'
-- Sempre preencha o campo "nd_si" com o valor normalizado EE.SS, mesmo que o formato original seja diferente.
-- Se não encontrar um campo, use null.
-- Valores monetários devem ser números decimais SEM R$ (ex: 1500.50) usando ponto como separador decimal.
-- Se texto tem quebra de linha ou hífen silábico, junte as palavras.
-- Extraia TODOS os itens, mesmo que a tabela seja longa.
-
-Retorne APENAS JSON válido.
+REGRAS:
+- Use ponto decimal (ex: 1500.50).
+- Unidade preserva letras (Un, Sv, Kg). Catmat SÓ números. ND sempre em formato EE.SS.
+- CNPJ tem SEMPRE 14 dígitos (não confunda com NUP).
+- Preencha todos os campos do JSON, extraia todos os itens da tabela.
 """.strip()
 
 
@@ -271,6 +284,70 @@ def _normalize_cnpj(value: Any) -> Optional[str]:
     return formatted
 
 
+def _is_instrument_page(text: str) -> bool:
+    """
+    Retorna True se a página pertence a um documento do instrumento
+    (edital, contrato, chamada pública etc.), NÃO da requisição.
+    """
+    if not text:
+        return False
+    text = str(text)
+    upper = text.upper()
+    lines = [ln.strip().upper() for ln in text.splitlines() if ln.strip()]
+    first_lines = "\n".join(lines[:25])
+    # Títulos/cabeçalhos de documentos do instrumento
+    if re.search(r"\bEDITAL\b", first_lines):
+        return True
+    if re.search(r"\bCHAMADA\s+P[UÚ]BLICA\b", first_lines):
+        return True
+    if "ATA DE REGISTRO DE PREÇOS" in upper:
+        return True
+    if "EXTRATO DE CONTRATO" in upper:
+        return True
+    if re.search(r"\bTERMO\s+DE\s+REFER[EÊ]NCIA\b", first_lines):
+        return True
+    # Contrato: contratante e contratada
+    if "CONTRATANTE" in upper and "CONTRATADA" in upper:
+        return True
+    # Cláusulas contratuais
+    if re.search(r"\bCL[ÁA]USULA\b", upper):
+        return True
+    if re.search(r"\bDA\s+VIG[EÊ]NCIA\b", upper):
+        return True
+    if re.search(r"\bDAS\s+OBRIGA[ÇC][OÕ]ES\b", upper):
+        return True
+    return False
+
+
+def _is_requisition_end(text: str) -> bool:
+    """
+    Retorna True se a página contém sinais de encerramento da requisição
+    (linha de assinatura, posto/graduação, fiscal, ordenador).
+    """
+    if not text:
+        return False
+    text = str(text)
+    upper = text.upper()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # Linha com 10+ underscores (linha de assinatura)
+    if re.search(r"_{10,}", text):
+        return True
+    # Posto/graduação militar em linha curta (assinante)
+    rank_pattern = re.compile(
+        r"^\s*(CAP|MAJ|TEN\s*CEL|CEL|1[º°]\s*TEN|2[º°]\s*TEN|ST|1[º°]\s*SGT|2[º°]\s*SGT|3[º°]\s*SGT|CB)\s*$",
+        re.IGNORECASE,
+    )
+    for ln in lines[-15:]:  # rodapé da página
+        if len(ln) < 50 and rank_pattern.search(ln):
+            return True
+    # Fiscal Adm ou Ch + seção/OM
+    if "FISCAL ADM" in upper or re.search(r"\bCH\s+[A-Z0-9/]", upper):
+        return True
+    if "ORDENADOR DE DESPESAS" in upper:
+        return True
+    return False
+
+
 def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
     """
     Identifica as páginas que compõem a peça da requisição.
@@ -280,7 +357,9 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
     - Confirma presença de "Assunto:" ou "Rfr:" ou "Do:"/"Ao:" nas linhas seguintes.
     - Inclui páginas subsequentes enquanto apresentarem tópicos numerados
       (ex.: "1.", "2.") ou referências claras à continuidade da requisição.
+    - Para ao detectar página de instrumento (edital/contrato) ou fim da requisição.
     """
+    print("STAGE2 DEBUG | Iniciando busca de páginas da requisição", flush=True)
     page_items: List[Tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
@@ -330,11 +409,17 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
             "Stage2: nenhuma página de requisição identificada. Candidatos avaliados: %s",
             debug_candidates,
         )
+        print("STAGE2 DEBUG | Retornando páginas: []", flush=True)
         return []
 
     requisition_pages: List[int] = [start_page]
+    max_continuation = 5
+    continuation_count = 0
 
     def _looks_like_continuation(text: str) -> bool:
+        if not text:
+            return False
+        text = str(text)
         upper = text.upper()
         if "REQUISIÇÃO" in upper or "MATERIAL" in upper or "SERVIÇO A SER ADQUIRIDO" in upper:
             return True
@@ -351,8 +436,23 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
             continue
         if not started:
             continue
-        if _looks_like_continuation(text or ""):
+        if continuation_count >= max_continuation:
+            break
+        text = (all_pages.get(f"pagina_{idx}") or "") if not isinstance(text, str) else text
+        page_text = text or ""
+        print(
+            f"STAGE2 DEBUG | Página {idx}: is_instrument={_is_instrument_page(page_text)}, "
+            f"is_end={_is_requisition_end(page_text)}, is_continuation={_looks_like_continuation(page_text)}",
+            flush=True,
+        )
+        if _is_instrument_page(page_text):
+            break
+        if _is_requisition_end(page_text):
             requisition_pages.append(idx)
+            break
+        if _looks_like_continuation(page_text):
+            requisition_pages.append(idx)
+            continuation_count += 1
         else:
             break
 
@@ -362,6 +462,7 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
         debug_candidates,
     )
 
+    print(f"STAGE2 DEBUG | Retornando páginas: {requisition_pages}", flush=True)
     return requisition_pages
 
 
@@ -703,45 +804,18 @@ def normalize_nd(raw: str) -> str:
     return raw
 
 
-def extract_items_table(
-    pages_text: List[str],
-    pdf_path: str | Path | None = None,
-) -> Tuple[List[Stage2Item], bool, Optional[float], Optional[str], Optional[str]]:
+def _parse_table_result(
+    result: Dict[str, Any],
+) -> Tuple[List[Stage2Item], Optional[str], Optional[str], Optional[Decimal]]:
     """
-    Extrai a tabela de itens da requisição.
-
-    Implementação inicial:
-    - Usa Gemini com prompt especializado para interpretar o TEXTO das páginas.
-    - Caso não haja texto, retorna lista vazia (suporte a OCR/vision pode ser
-      adicionado em uma evolução futura).
+    Parseia o dict retornado pelo Gemini (tabela de itens) em lista de
+    Stage2Item, fornecedor, cnpj e valor_total_geral. Reutilizado no fluxo
+    normal e no fallback Vision.
     """
-    combined = "\n\n".join(pages_text or []).strip()
-    if not combined:
-        return [], False, None, None, None
-
-    try:
-        proc = GeminiProcessor()
-    except ValueError as exc:
-        logger.warning("Gemini indisponível para extração de tabela no estágio 2: %s", exc)
-        return [], False, None, None, None
-
-    prompt = STAGE2_TABLE_PROMPT + "\n\nTEXTO DA TABELA:\n" + combined
-
-    try:
-        result, _, _ = proc._generate(prompt, "stage2_table")  # type: ignore[attr-defined]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Falha ao extrair tabela de itens com IA no estágio 2: %s", exc)
-        return [], False, None, None, None
-
-    if not isinstance(result, dict):
-        return [], False, None, None, None
-
     fornecedor = result.get("fornecedor")
     cnpj = _normalize_cnpj(result.get("cnpj"))
-
     itens_raw = result.get("itens") or []
     items: List[Stage2Item] = []
-
     for raw in itens_raw:
         if not isinstance(raw, dict):
             continue
@@ -751,21 +825,17 @@ def extract_items_table(
                 item_int = int(item_num) if item_num is not None else None
             except (TypeError, ValueError):
                 item_int = None
-
             q = _safe_decimal(raw.get("quantidade"))
             vu = _safe_decimal(raw.get("valor_unitario"))
             vt = _safe_decimal(raw.get("valor_total"))
-
             desc_full = _normalize_whitespace(str(raw.get("descricao") or "")) or None
             desc_short = (
                 (desc_full or "")[:80] + ("..." if desc_full and len(desc_full) > 80 else "")
                 if desc_full
                 else None
             )
-
             nd_raw = str(raw.get("nd_si") or raw.get("nd") or "").strip()
             nd_norm = normalize_nd(nd_raw) if nd_raw else None
-
             item = Stage2Item(
                 item=item_int,
                 catmat=_normalize_catmat(raw.get("catmat") or raw.get("codigo")),
@@ -782,8 +852,168 @@ def extract_items_table(
         except Exception as exc:  # noqa: BLE001
             logger.debug("Falha ao normalizar item da tabela no estágio 2: %s", exc)
             continue
-
     valor_total_geral = _safe_decimal(result.get("valor_total_geral"))
+    return items, fornecedor, cnpj, valor_total_geral
+
+
+def extract_items_table(
+    pages_text: List[str],
+    pdf_path: str | Path | None = None,
+    req_pages: List[int] | None = None,
+    image_pages: List[int] | None = None,
+) -> Tuple[List[Stage2Item], bool, Optional[float], Optional[str], Optional[str]]:
+    """
+    Extrai a tabela de itens da requisição.
+
+    Implementação inicial:
+    - Usa Gemini com prompt especializado para interpretar o TEXTO das páginas.
+    - Se alguma página de req_pages estiver em image_pages e pdf_path existir,
+      envia as imagens ao Gemini Vision (_generate_with_images).
+    - Caso não haja texto nem imagens, retorna lista vazia.
+    """
+    print(
+        f"STAGE2 DEBUG | extract_items_table chamada com req_pages={req_pages}, image_pages={image_pages}, pdf_path={pdf_path}",
+        flush=True,
+    )
+    combined = "\n\n".join(pages_text or []).strip()
+    req_pages = req_pages or []
+    image_pages = image_pages or []
+    images_b64: List[str] = []
+    if pdf_path and req_pages:
+        for page_num in req_pages:
+            if page_num in image_pages:
+                try:
+                    b64 = page_to_base64(pdf_path, page_num)
+                    if b64:
+                        images_b64.append(b64)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Falha ao converter página %s para base64: %s", page_num, exc)
+
+    if not combined and not (pdf_path and req_pages):
+        return [], False, None, None, None
+
+    try:
+        proc = GeminiProcessor()
+    except ValueError as exc:
+        logger.warning("Gemini indisponível para extração de tabela no estágio 2: %s", exc)
+        return [], False, None, None, None
+
+    # 1. Extração base por texto (sem imagens; fallbacks vêm depois)
+    prompt_base = STAGE2_TABLE_PROMPT + "\n\nTEXTO DA TABELA:\n" + (
+        combined or "(sem texto extraído; será usado fallback Azure ou Vision se disponível)"
+    )
+    print(
+        f"STAGE2 DEBUG | páginas com imagem na requisição: {[p for p in (req_pages or []) if p in set(image_pages or [])]}",
+        flush=True,
+    )
+    try:
+        result, _, _ = proc._generate(prompt_base, "stage2_table")  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao extrair tabela de itens com IA no estágio 2: %s", exc)
+        return [], False, None, None, None
+
+    if not isinstance(result, dict):
+        return [], False, None, None, None
+
+    items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
+
+    if not items or len(items) == 0:
+        print("STAGE2 DEBUG | 0 itens extraídos na primeira tentativa.", flush=True)
+        print(
+            f"STAGE2 DEBUG | Status Azure Check -> pdf_path={bool(pdf_path)}, req_pages={bool(req_pages)}, "
+            f"func_azure={bool(extract_table_text_with_azure)}, func_pages={bool(get_pages_with_large_images)}",
+            flush=True,
+        )
+
+        # TENTATIVA 2: AZURE
+        if pdf_path and req_pages and extract_table_text_with_azure and get_pages_with_large_images:
+            print("STAGE2 DEBUG | Entrando no bloco do AZURE...", flush=True)
+            try:
+                pages_with_imgs = get_pages_with_large_images(pdf_path, req_pages)
+                print(f"STAGE2 DEBUG | Páginas selecionadas para Azure: {pages_with_imgs}", flush=True)
+
+                azure_tsvs: List[str] = []
+                for p_num in pages_with_imgs:
+                    img_b64 = page_to_base64(pdf_path, p_num)
+                    if img_b64:
+                        print(f"STAGE2 DEBUG | Enviando página {p_num} para o Azure API...", flush=True)
+                        tsv = extract_table_text_with_azure(img_b64)
+                        if tsv:
+                            azure_tsvs.append(tsv)
+
+                azure_tsv_combined = "\n".join(azure_tsvs)
+                if azure_tsv_combined.strip():
+                    print(
+                        "STAGE2 DEBUG | TSV do Azure recebido com sucesso. Enviando ao Gemini para estruturação.",
+                        flush=True,
+                    )
+                    prompt_azure = (
+                        STAGE2_TABLE_PROMPT
+                        + "\n\nTEXTO DA TABELA (TSV do Azure):\n"
+                        + azure_tsv_combined
+                    )
+                    result_azure, _, _ = proc._generate(  # type: ignore[attr-defined]
+                        prompt_azure, "stage2_table_azure"
+                    )
+                    if isinstance(result_azure, dict):
+                        items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
+                            result_azure
+                        )
+                        if items:
+                            print(
+                                f"[Stage 2] Azure TSV fallback acionado e extraiu {len(items)} itens.",
+                                flush=True,
+                            )
+                            print(
+                                f"STAGE2 DEBUG | Resultado da extração: {len(items)} itens, fornecedor={fornecedor}, cnpj={cnpj}",
+                                flush=True,
+                            )
+                            return (
+                                items,
+                                True,
+                                float(valor_total_geral) if valor_total_geral is not None else None,
+                                fornecedor,
+                                cnpj,
+                            )
+                else:
+                    print("STAGE2 DEBUG | Azure retornou TSV vazio.", flush=True)
+            except Exception as e:
+                print(f"STAGE2 DEBUG | Erro durante a execução do Azure: {e}", flush=True)
+        else:
+            print(
+                "STAGE2 DEBUG | Bloco do Azure foi ignorado por falta de dependências ou parâmetros!",
+                flush=True,
+            )
+
+        # TENTATIVA 3: GEMINI VISION (só roda se o Azure falhou ou não retornou itens)
+        if not items or len(items) == 0:
+            print("[Stage 2] Vision fallback acionado.", flush=True)
+            if pdf_path and req_pages and page_to_base64:
+                fallback_images: List[str] = []
+                for p in req_pages:
+                    img = page_to_base64(pdf_path, p)
+                    if img:
+                        fallback_images.append(img)
+                if fallback_images:
+                    try:
+                        prompt_vision = (
+                            STAGE2_TABLE_PROMPT
+                            + "\n\nTEXTO DA TABELA:\n(sem texto extraído; use as imagens anexas)"
+                        )
+                        result_fb, _, _ = proc._generate_with_images(  # type: ignore[attr-defined]
+                            prompt_vision, fallback_images, "stage2_table_vision_fallback"
+                        )
+                        if isinstance(result_fb, dict):
+                            items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
+                                result_fb
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Vision fallback falhou no estágio 2: %s", exc)
+
+    print(
+        f"STAGE2 DEBUG | Resultado da extração: {len(items)} itens, fornecedor={fornecedor}, cnpj={cnpj}",
+        flush=True,
+    )
     return (
         items,
         True,
@@ -903,7 +1133,7 @@ def _compute_confidence(
             fornecedor_conf = 90
 
     cnpj_conf = 0
-    if data.cnpj and CNPJ_STRICT_REGEX.fullmatch(data.cnpj):
+    if data.cnpj and isinstance(data.cnpj, str) and CNPJ_STRICT_REGEX.fullmatch(data.cnpj):
         cnpj_conf = 95
     elif data.cnpj:
         cnpj_conf = 60
@@ -960,7 +1190,12 @@ def _build_stage2_uasg(
     codigo_norm = (codigo or "").strip() or None
 
     if codigo_norm:
-        mapped_name = UASG_TO_OM.get(codigo_norm)
+        try:
+            from ..uasg_store import get_uasg_nome
+            mapped_name = get_uasg_nome(codigo_norm) or UASG_TO_OM.get(codigo_norm) or nome
+        except ImportError:
+            from uasg_store import get_uasg_nome
+            mapped_name = get_uasg_nome(codigo_norm) or UASG_TO_OM.get(codigo_norm) or nome
         return Stage2UASG(codigo=codigo_norm, nome=mapped_name)
 
     # Para contratos, a UASG pode não existir no processo sem ser erro.
@@ -970,13 +1205,18 @@ def _build_stage2_uasg(
     return Stage2UASG(codigo=None, nome=nome)
 
 
-def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[str, Any]:
+def run(
+    all_pages: Dict[str, str],
+    pdf_path: str | Path | None = None,
+    image_pages: List[int] | None = None,
+) -> Dict[str, Any]:
     """
     Executa o Estágio 2 usando todas as páginas extraídas.
 
     Parâmetros:
         all_pages: mapa "pagina_n" -> texto bruto.
-        pdf_path: caminho do PDF original (reservado para suporte futuro a OCR/vision).
+        pdf_path: caminho do PDF original (para conversão de páginas-imagem).
+        image_pages: números das páginas que são imagem (para Vision quando a tabela estiver nelas).
     """
     if not all_pages:
         result = Stage2Result(
@@ -1023,9 +1263,14 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
 
     tipo_empenho = extract_empenho_type(requisition_text)
 
-    items, extracted_by_ai, valor_total_geral, fornecedor_tab, cnpj_tab = extract_items_table(
-        texts, pdf_path=pdf_path
-    )
+    try:
+        items, extracted_by_ai, valor_total_geral, fornecedor_tab, cnpj_tab = extract_items_table(
+            texts, pdf_path=pdf_path, req_pages=requisition_pages, image_pages=image_pages or [],
+        )
+    except Exception as exc:
+        print(f"STAGE2 DEBUG | ERRO em extract_items_table: {exc}", flush=True)
+        traceback.print_exc()
+        items, extracted_by_ai, valor_total_geral, fornecedor_tab, cnpj_tab = [], False, None, None, None
 
     valor_total = valor_total_geral
     if valor_total is None and items:
@@ -1037,6 +1282,16 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
         valor_total = float(total_dec)
 
     verificacao = verify_calculations(items, valor_total)
+
+    # Sanitizar fornecedor e cnpj caso venham como dict da IA
+    if isinstance(fornecedor_tab, dict):
+        fornecedor_tab = fornecedor_tab.get("nome") or fornecedor_tab.get("razao_social") or None
+        if fornecedor_tab is not None:
+            fornecedor_tab = str(fornecedor_tab)
+    if isinstance(cnpj_tab, dict):
+        cnpj_tab = cnpj_tab.get("numero") or cnpj_tab.get("cnpj") or None
+        if cnpj_tab is not None:
+            cnpj_tab = _normalize_cnpj(str(cnpj_tab))
 
     data = Stage2Data(
         instrumento=Stage2Instrument(
@@ -1105,9 +1360,13 @@ def run(all_pages: Dict[str, str], pdf_path: str | Path | None = None) -> Dict[s
             if not data.tipo_empenho and tipo_ai:
                 data.tipo_empenho = tipo_ai
             if not data.fornecedor and fornecedor_ai:
-                data.fornecedor = fornecedor_ai
+                if isinstance(fornecedor_ai, dict):
+                    fornecedor_ai = fornecedor_ai.get("nome") or fornecedor_ai.get("razao_social")
+                data.fornecedor = str(fornecedor_ai) if fornecedor_ai else None
             if not data.cnpj and cnpj_ai:
-                data.cnpj = cnpj_ai
+                if isinstance(cnpj_ai, dict):
+                    cnpj_ai = cnpj_ai.get("numero") or cnpj_ai.get("cnpj")
+                data.cnpj = _normalize_cnpj(str(cnpj_ai)) if cnpj_ai else None
 
     # Fallback extra: se, mesmo após regex em todas as páginas e fallback geral,
     # ainda não houver instrumento ou UASG, usa IA curta nas 3 primeiras páginas.

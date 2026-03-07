@@ -7,15 +7,61 @@ Cada análise é associada a um usuário (Google OAuth) por user_id.
 from __future__ import annotations
 
 import json
+import logging
+logger = logging.getLogger(__name__)
 import os
 import uuid
 from typing import Any, Dict, List, Optional
 
-import asyncpg
+import asyncpg  # type: ignore[import-untyped]
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 pool: Optional[asyncpg.Pool] = None
+
+# UASGs da 9ª RM para seed inicial (código -> nome).
+UASG_SEED_9RM: Dict[str, str] = {
+    "160078": "Colégio Militar de Campo Grande",
+    "160095": "58º Batalhão de Infantaria Motorizado",
+    "160131": "17º Regimento de Cavalaria Mecanizado",
+    "160132": "9º Batalhão de Engenharia de Combate",
+    "160133": "10º Regimento de Cavalaria Mecanizado",
+    "160136": "9º Grupamento Logístico",
+    "160140": "9ª Região Militar",
+    "160141": "Comissão Regional de Obras da 9ª Região Militar",
+    "160142": "9º Batalhão de Suprimento",
+    "160143": "Hospital Militar de Área de Campo Grande",
+    "160145": "17º Batalhão de Fronteira",
+    "160146": "Comando da 18ª Brigada de Infantaria de Pantanal",
+    "160147": "47º Batalhão de Infantaria",
+    "160149": "Comando da 4ª Brigada de Cavalaria Mecanizada",
+    "160150": "4ª Companhia de Engenharia de Combate Mecanizada",
+    "160151": "9º Grupo de Artilharia de Campanha",
+    "160152": "11º Regimento de Cavalaria Mecanizado",
+    "160153": "2ª Companhia de Fronteira",
+    "160155": "Comando de Fronteira de Jauru/66º Batalhão de Infantaria Motorizado",
+    "160156": "44º Batalhão de Infantaria Motorizado",
+    "160157": "9º Batalhão de Engenharia de Construção",
+    "160158": "Comando da 13ª Brigada Infantaria Motorizada",
+    "160159": "18º Grupo de Artilharia de Campanha",
+    "160512": "20º Regimento de Cavalaria Blindado",
+    "160521": "3ª Bateria de Artilharia Antiaérea",
+    "160522": "28º Batalhão Logístico",
+    "160530": "Base de Administração e Apoio do Comando Militar do Oeste",
+}
+
+
+async def _seed_uasgs_if_empty(conn: asyncpg.Connection) -> None:
+    """Preenche a tabela uasgs com as UASGs da 9ª RM se estiver vazia."""
+    row = await conn.fetchrow("SELECT 1 FROM uasgs LIMIT 1")
+    if row is not None:
+        return
+    for codigo, nome in UASG_SEED_9RM.items():
+        await conn.execute(
+            "INSERT INTO uasgs (codigo, nome) VALUES ($1, $2) ON CONFLICT (codigo) DO NOTHING",
+            codigo,
+            nome,
+        )
 
 
 async def init_db() -> None:
@@ -25,9 +71,8 @@ async def init_db() -> None:
     """
     global pool
     if not DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL não definida. Configure a URL do PostgreSQL no ambiente."
-        )
+        logger.warning("DATABASE_URL não definida. Banco desabilitado (modo local).")
+        return
 
     if pool is None:
         pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
@@ -70,6 +115,16 @@ async def init_db() -> None:
             )
             """
         )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS uasgs (
+                codigo TEXT PRIMARY KEY,
+                nome TEXT NOT NULL
+            )
+            """
+        )
+        await _seed_uasgs_if_empty(conn)
 
 
 def _extract_summary(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,4 +356,33 @@ async def delete_analysis(analysis_id: str, user_id: str) -> bool:
         )
         # asyncpg retorna strings como "DELETE 1"
         return result.upper().startswith("DELETE 1")
+
+
+async def get_all_uasgs() -> List[Dict[str, Any]]:
+    """Retorna todas as UASGs (codigo, nome) para popular o cache."""
+    if pool is None:
+        raise RuntimeError("Pool de conexões não inicializado.")
+    async with pool.acquire() as conn:  # type: ignore[union-attr]
+        rows = await conn.fetch("SELECT codigo, nome FROM uasgs ORDER BY codigo")
+        return [{"codigo": r["codigo"], "nome": r["nome"]} for r in rows]
+
+
+async def add_uasg(codigo: str, nome: str) -> bool:
+    """Insere ou atualiza uma UASG. Retorna True se inseriu/atualizou."""
+    if pool is None:
+        raise RuntimeError("Pool de conexões não inicializado.")
+    codigo = (codigo or "").strip()
+    nome = (nome or "").strip()
+    if not codigo:
+        return False
+    async with pool.acquire() as conn:  # type: ignore[union-attr]
+        await conn.execute(
+            """
+            INSERT INTO uasgs (codigo, nome) VALUES ($1, $2)
+            ON CONFLICT (codigo) DO UPDATE SET nome = EXCLUDED.nome
+            """,
+            codigo,
+            nome,
+        )
+    return True
 

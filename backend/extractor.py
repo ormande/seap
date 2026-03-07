@@ -64,7 +64,7 @@ def page_to_base64(pdf_path: str | Path, page_number: int) -> str:
         kwargs: Dict[str, Any] = {
             "first_page": page_number,
             "last_page": page_number,
-            "dpi": 200,
+            "dpi": 300,
         }
         if POPPLER_PATH:
             kwargs["poppler_path"] = POPPLER_PATH
@@ -77,6 +77,45 @@ def page_to_base64(pdf_path: str | Path, page_number: int) -> str:
     except Exception as exc:  # noqa: BLE001
         print(f"[Extractor] Erro ao converter página {page_number} para imagem: {exc}")
     return ""
+
+
+def get_pages_with_large_images(
+    pdf_path: str | Path, candidate_pages: list[int]
+) -> list[int]:
+    """
+    Retorna as páginas (1-indexed) para enviar ao Azure Document Intelligence:
+    âncora "6. Material... a ser adquirido/contratado", ou imagem grande, ou pouco texto.
+    Se nada for detectado, retorna todas as candidate_pages como fallback.
+    """
+    result: list[int] = []
+    anchor_pattern = re.compile(
+        r"6\.\s*Material(?:/Servi[çc]o)?\s+a\s+ser\s+(?:adquirido|contratado)",
+        re.IGNORECASE,
+    )
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_num in candidate_pages:
+                try:
+                    page = pdf.pages[page_num - 1]
+                    has_large_image = any(
+                        img.get("width", 0) > 200 and img.get("height", 0) > 100
+                        for img in (page.images or [])
+                    )
+                    text = page.extract_text() or ""
+                    has_anchor = bool(anchor_pattern.search(text))
+                    if has_anchor or has_large_image or len(text.strip()) < 1500:
+                        result.append(page_num)
+                        print(
+                            f"[Extractor] Página {page_num} selecionada para o Azure "
+                            f"(Âncora: {has_anchor}, Img: {has_large_image})"
+                        )
+                except Exception as e:
+                    print(f"[Extractor] Erro ao ler página {page_num}: {e}")
+
+        return result if result else candidate_pages
+    except Exception as e:
+        print(f"[Extractor] Erro crítico ao abrir PDF para imagens: {e}")
+        return candidate_pages
 
 
 def detect_page_type(page: pdfplumber.page.Page) -> PageType:

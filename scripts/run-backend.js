@@ -6,13 +6,16 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const isWindows = process.platform === 'win32';
-const venvPython = path.join(__dirname, '..', '.venv', 'Scripts', isWindows ? 'python.exe' : 'python');
+const venvPython = isWindows
+  ? 'C:\\Users\\User\\anaconda3\\envs\\projeto_pdf\\python.exe'
+  : path.join(__dirname, '..', '.venv', 'bin', 'python');
 
 function run() {
   const child = spawn(venvPython, ['-m', 'backend.main'], {
     stdio: 'inherit',
     shell: false,
     cwd: path.join(__dirname, '..'),
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });
 
   child.on('exit', (code, signal) => {

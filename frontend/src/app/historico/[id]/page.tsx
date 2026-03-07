@@ -269,7 +269,31 @@ export default function HistoricoDetailPage() {
           defaultOpen={false}
         >
           {stage2?.data ? (
-            <Stage2Content data={stage2.data} confidence={stage2.confidence} />
+            <Stage2Content
+              data={stage2.data}
+              confidence={stage2.confidence}
+              onUasgNomeAdded={(codigo, nome) => {
+                setAnalysis((prev) => {
+                  if (!prev?.dados_completos?.stages?.stage2?.data) return prev;
+                  return {
+                    ...prev,
+                    dados_completos: {
+                      ...prev.dados_completos,
+                      stages: {
+                        ...prev.dados_completos.stages,
+                        stage2: {
+                          ...prev.dados_completos.stages.stage2,
+                          data: {
+                            ...prev.dados_completos.stages.stage2.data,
+                            uasg: { codigo, nome },
+                          },
+                        },
+                      },
+                    },
+                  };
+                });
+              }}
+            />
           ) : (
             <p className="text-xs text-[var(--text-secondary)]">
               Não foi possível identificar a peça da requisição neste PDF.

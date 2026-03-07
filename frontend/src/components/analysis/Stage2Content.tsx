@@ -6,6 +6,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 
+import { addUASG } from '../../lib/api';
 import type {
   Stage2Confidence,
   Stage2Data,
@@ -17,6 +18,8 @@ import { ConfidenceBadge } from './ConfidenceBadge';
 type Stage2ContentProps = {
   data: Stage2Data | null;
   confidence: Stage2Confidence | null;
+  /** Chamado após cadastrar nome de UASG não reconhecida; o parent pode atualizar o estado da análise. */
+  onUasgNomeAdded?: (codigo: string, nome: string) => void;
 };
 
 const formatCurrencyBRL = (value: number | null | undefined): string => {
@@ -32,8 +35,12 @@ const formatCurrencyBRL = (value: number | null | undefined): string => {
 export const Stage2Content: React.FC<Stage2ContentProps> = ({
   data,
   confidence,
+  onUasgNomeAdded,
 }) => {
   const [showDivergences, setShowDivergences] = useState(false);
+  const [uasgNomeInput, setUasgNomeInput] = useState('');
+  const [uasgAdding, setUasgAdding] = useState(false);
+  const [uasgError, setUasgError] = useState<string | null>(null);
 
   const items: Stage2Item[] = data?.itens ?? [];
   const divergencias: Stage2Divergencia[] =
@@ -166,27 +173,76 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
           </div>
 
           <div className="flex items-start justify-between gap-2">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-[var(--text-secondary)]">
                 UASG / UG Gerenciadora
               </p>
-              <p className="mt-1 text-sm text-[var(--text-primary)]">
-                {data?.uasg ? (
-                  <>
+              {data?.uasg?.codigo ? (
+                <div className="mt-1 space-y-2">
+                  <p className="text-sm text-[var(--text-primary)]">
                     <span className="font-semibold">
-                      {data.uasg.codigo ?? '—'}
+                      {data.uasg.codigo}
                     </span>
                     {data.uasg.nome && (
                       <span className="ml-1 text-[var(--text-secondary)]">
-                        {'– '}
+                        {' – '}
                         {data.uasg.nome}
                       </span>
                     )}
-                  </>
-                ) : (
-                  'Não identificado'
-                )}
-              </p>
+                  </p>
+                  {!data.uasg.nome || data.uasg.nome.trim() === '' ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nome da UASG (preencha e adicione ao banco)"
+                        value={uasgNomeInput}
+                        onChange={(e) => {
+                          setUasgNomeInput(e.target.value);
+                          setUasgError(null);
+                        }}
+                        className="min-w-[200px] max-w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/70 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                        disabled={uasgAdding}
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const nome = uasgNomeInput.trim();
+                          if (!nome) {
+                            setUasgError('Informe o nome da UASG.');
+                            return;
+                          }
+                          setUasgAdding(true);
+                          setUasgError(null);
+                          try {
+                            await addUASG(data.uasg!.codigo!, nome);
+                            onUasgNomeAdded?.(data.uasg!.codigo!, nome);
+                            setUasgNomeInput('');
+                          } catch (e) {
+                            setUasgError(
+                              e instanceof Error ? e.message : 'Erro ao cadastrar UASG.',
+                            );
+                          } finally {
+                            setUasgAdding(false);
+                          }
+                        }}
+                        disabled={uasgAdding || !uasgNomeInput.trim()}
+                        className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-200"
+                      >
+                        {uasgAdding ? 'Salvando…' : 'Adicionar ao banco'}
+                      </button>
+                      {uasgError && (
+                        <span className="text-[11px] text-rose-600 dark:text-rose-400">
+                          {uasgError}
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-1 text-sm text-[var(--text-primary)]">
+                  Não identificado
+                </p>
+              )}
             </div>
             <ConfidenceBadge value={confidence?.uasg ?? null} />
           </div>

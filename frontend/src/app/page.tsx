@@ -460,7 +460,28 @@ export default function HomePage() {
           defaultOpen={false}
         >
           {stage2 && stage2.data ? (
-            <Stage2Content data={stage2.data} confidence={stage2.confidence} />
+            <Stage2Content
+              data={stage2.data}
+              confidence={stage2.confidence}
+              onUasgNomeAdded={(codigo, nome) => {
+                setResult((prev) => {
+                  if (!prev?.stages?.stage2?.data) return prev;
+                  return {
+                    ...prev,
+                    stages: {
+                      ...prev.stages,
+                      stage2: {
+                        ...prev.stages.stage2,
+                        data: {
+                          ...prev.stages.stage2.data,
+                          uasg: { codigo, nome },
+                        },
+                      },
+                    },
+                  };
+                });
+              }}
+            />
           ) : (
             <p className="text-xs text-[var(--text-secondary)]">
               Não foi possível identificar a peça da requisição neste PDF ou o
