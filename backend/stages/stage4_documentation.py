@@ -469,6 +469,7 @@ def run(
     stage2_data: Optional[Dict[str, Any]] = None,
     used_pages: Optional[Dict[str, Set[int]]] = None,
     analysis_date: Optional[str] = None,
+    nup_id: str = "",
 ) -> Dict[str, Any]:
     """
     Orquestra o Estágio 4: identifica páginas de CADIN/TCU/SICAF, extrai,
@@ -495,6 +496,12 @@ def run(
         cadin_data["encontrado"] = True
     else:
         cadin_data = {"encontrado": False, "aprovado": False}
+    cadin_status = (
+        "regular"
+        if cadin_data.get("aprovado")
+        else ("irregular" if cadin_data.get("encontrado") else "não encontrado")
+    )
+    print(f"[Stage4][{nup_id}] CADIN: {cadin_status}", flush=True)
 
     if doc_pages["tcu"]:
         text = " ".join(
@@ -504,6 +511,12 @@ def run(
         tcu_data["encontrado"] = True
     else:
         tcu_data = {"encontrado": False, "aprovado": False}
+    tcu_status = (
+        "nada consta"
+        if tcu_data.get("aprovado")
+        else ("consta" if tcu_data.get("encontrado") else "não encontrado")
+    )
+    print(f"[Stage4][{nup_id}] TCU: {tcu_status}", flush=True)
 
     if doc_pages["sicaf"]:
         # Usar o SICAF mais recente (última página listada = costuma ser a mais recente)
@@ -514,6 +527,12 @@ def run(
         sicaf_data["encontrado"] = True
     else:
         sicaf_data = {"encontrado": False, "aprovado": False}
+    sicaf_status = (
+        "regular"
+        if sicaf_data.get("aprovado")
+        else ("irregular" if sicaf_data.get("encontrado") else "não encontrado")
+    )
+    print(f"[Stage4][{nup_id}] SICAF: {sicaf_status}", flush=True)
 
     cnpj_cruzamento = cross_check_cnpj(
         cnpj_ref,
@@ -521,6 +540,8 @@ def run(
         tcu_data.get("cnpj") if tcu_data else None,
         sicaf_data.get("cnpj") if sicaf_data else None,
     )
+    cnpj_ok = "consistente" if cnpj_cruzamento.get("consistente") else "DIVERGENTE"
+    print(f"[Stage4][{nup_id}] CNPJ cruzamento: {cnpj_ok} (ref={cnpj_ref or '?'})", flush=True)
 
     irregularities: List[str] = []
     if not cnpj_cruzamento.get("consistente"):
@@ -538,11 +559,19 @@ def run(
 
     complementares: List[Dict[str, Any]] = []
     if irregularities:
+        print(
+            f"[Stage4][{nup_id}] {len(irregularities)} irregularidade(s), buscando complementares...",
+            flush=True,
+        )
         complementares = search_complementary_docs(
             all_pages,
             doc_pages["other"],
             irregularities,
             cnpj_ref or "",
+        )
+        print(
+            f"[Stage4][{nup_id}] Complementares: {len(complementares)} doc(s) encontrado(s)",
+            flush=True,
         )
 
     # Veredicto

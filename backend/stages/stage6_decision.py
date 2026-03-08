@@ -555,6 +555,7 @@ def run(all_stages: Dict[str, Any]) -> Dict[str, Any]:
     - Determina veredicto.
     - Opcionalmente gera um despacho sugerido.
     """
+    nup_id = all_stages.get("nup_id", "")
     stage1: Optional[Stage1Result] = all_stages.get("stage1")
     stage2: Optional[Stage2Result] = all_stages.get("stage2")
     stage3: Optional[Stage3Result] = all_stages.get("stage3")
@@ -562,10 +563,20 @@ def run(all_stages: Dict[str, Any]) -> Dict[str, Any]:
     stage5: Optional[Stage5Result] = all_stages.get("stage5")
 
     issues = collect_issues(stage1, stage2, stage3, stage4, stage5)
+    print(
+        f"[Stage6][{nup_id}] Issues: "
+        f"{len(issues['reprovacoes'])} reprovação(ões), "
+        f"{len(issues['ressalvas'])} ressalva(s), "
+        f"{len(issues['pendencias_despachos'])} pendência(s)",
+        flush=True,
+    )
     verdict = determine_verdict(issues)
+    print(f"[Stage6][{nup_id}] Veredicto: {verdict}", flush=True)
 
     # Despacho só é gerado para aprovado_com_ressalva ou reprovado.
     despacho_text = generate_dispatch(verdict, issues, all_stages)
+    has_despacho = "sim" if despacho_text else "não"
+    print(f"[Stage6][{nup_id}] Despacho gerado: {has_despacho}", flush=True)
 
     # Converte listas de Stage6Issue para dicts.
     reprovacoes_dicts = [i.model_dump() for i in issues["reprovacoes"]]

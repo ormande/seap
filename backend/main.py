@@ -462,6 +462,12 @@ async def analyze_pdf(
                 confidence=stage1_confidence,
             )
 
+            nup_id = (stage1_data.nup or "SEM-NUP")[:11]
+            print(
+                f"[SEAP][{nup_id}] === INÍCIO DA ANÁLISE === {total_pages} pgs, {image_count} imgs",
+                flush=True,
+            )
+
             yield f"data: {json.dumps({'phase': 'stage1_done', 'progress': 30, 'message': 'Estágio 1 concluído.'})}\n\n"
 
             # 30–45%: Estágio 2 — Análise da requisição
@@ -475,6 +481,8 @@ async def analyze_pdf(
                 pages,
                 str(temp_path),
                 image_pages,
+                total_pages,
+                nup_id,
             )
             stage2_result = Stage2Result(**stage2_raw)
 
@@ -496,10 +504,11 @@ async def analyze_pdf(
             stage3_raw = await asyncio.to_thread(
                 stage3_nc.run,
                 pages,
-                req_pages,
+                req_pages_list,
                 pdf_path,
                 image_pages,
                 total_pages,
+                nup_id,
             )
             stage3_result = Stage3Result(**stage3_raw)
 
@@ -522,7 +531,7 @@ async def analyze_pdf(
                         stage3_result.nd_crosscheck = nd_cross
                 except Exception as exc:  # noqa: BLE001
                     # Em caso de falha no cruzamento, apenas registra log e segue fluxo principal.
-                    print(f"[Stage3] Falha no cruzamento ND × Itens: {exc}")
+                    print(f"[Stage3][{nup_id}] Falha no cruzamento ND × Itens: {exc}", flush=True)
 
             yield f"data: {json.dumps({'phase': 'stage3_done', 'progress': 60, 'message': 'Estágio 3 concluído.'})}\n\n"
 
@@ -545,6 +554,7 @@ async def analyze_pdf(
                 stage2_dump,
                 used_pages,
                 None,  # analysis_date: usa data atual
+                nup_id,
             )
             stage4_result = Stage4Result(**stage4_raw)
 
@@ -560,6 +570,7 @@ async def analyze_pdf(
                 stage5_dispatches.run,
                 pages,
                 used_pages,
+                nup_id,
             )
             stage5_result = Stage5Result(**stage5_raw)
 
@@ -579,9 +590,15 @@ async def analyze_pdf(
                     "stage3": stage3_result,
                     "stage4": stage4_result,
                     "stage5": stage5_result,
+                    "nup_id": nup_id,
                 },
             )
             stage6_result = Stage6Result(**stage6_raw)
+
+            print(
+                f"[SEAP][{nup_id}] === FIM DA ANÁLISE === veredicto={stage6_result.status}",
+                flush=True,
+            )
 
             metadata = AnalyzeMetadata(
                 total_paginas=int(metadata_raw.get("total_paginas") or 0),

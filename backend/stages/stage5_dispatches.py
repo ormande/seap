@@ -500,6 +500,7 @@ def cross_check_requirements(
 def run(
     all_pages: Dict[str, str],
     used_pages: Optional[Dict[str, Set[int]]] = None,
+    nup_id: str = "",
 ) -> Dict[str, Any]:
     """
     Orquestra o Estágio 5:
@@ -508,6 +509,7 @@ def run(
     - Executa verificação cruzada de exigências.
     """
     metas = find_dispatch_pages(all_pages, used_pages)
+    print(f"[Stage5][{nup_id}] {len(metas)} despacho(s) encontrado(s)", flush=True)
     if not metas:
         result = Stage5Result(
             status="sa",
@@ -580,6 +582,11 @@ def run(
                 pages=meta.pages,
             )
         )
+        print(
+            f"[Stage5][{nup_id}] Despacho {meta.numero or '?'} ({meta.data_str or '?'}): "
+            f"tipo={tipo}, {len(exigencias)} exigência(s)",
+            flush=True,
+        )
 
     # Se não houver exigências em nenhum despacho, resultado global é S/A.
     if not all_requirements:
@@ -596,6 +603,13 @@ def run(
 
     cross_result = cross_check_requirements(dispatch_models, all_requirements)
     status_list = cross_result.get("exigencias_status") or []
+
+    pend_count = len([e for e in status_list if isinstance(e, dict) and (e.get("status") or "") == "pendente"])
+    atend_count = len([e for e in status_list if isinstance(e, dict) and (e.get("status") or "") == "atendida"])
+    print(
+        f"[Stage5][{nup_id}] Cross-check: {atend_count} atendida(s), {pend_count} pendente(s)",
+        flush=True,
+    )
 
     pendentes: List[Stage5ExigenciaStatus] = []
     atendidas: List[Stage5ExigenciaStatus] = []

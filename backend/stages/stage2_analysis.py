@@ -31,7 +31,7 @@ except Exception as e1:
         from ..azure_processor import extract_table_text_with_azure
     except Exception as e2:
         print(f"\n{'='*50}", flush=True)
-        print("STAGE2 DEBUG CRÍTICO | FALHA TOTAL AO IMPORTAR AZURE_PROCESSOR!", flush=True)
+        print("[Stage2][?] FALHA AO IMPORTAR AZURE_PROCESSOR!", flush=True)
         print(f"Erro Absoluto: {e1}", flush=True)
         print(f"Erro Relativo: {e2}", flush=True)
         print(f"{'='*50}\n", flush=True)
@@ -44,7 +44,7 @@ except Exception as e1:
         from ..extractor import get_pages_with_large_images, page_to_base64
     except Exception as e2:
         print(f"\n{'='*50}", flush=True)
-        print("STAGE2 DEBUG CRÍTICO | FALHA TOTAL AO IMPORTAR EXTRACTOR!", flush=True)
+        print("[Stage2][?] FALHA AO IMPORTAR EXTRACTOR!", flush=True)
         print(f"Erro Absoluto: {e1}", flush=True)
         print(f"Erro Relativo: {e2}", flush=True)
         print(f"{'='*50}\n", flush=True)
@@ -355,7 +355,7 @@ def _is_requisition_end(text: str) -> bool:
     return False
 
 
-def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
+def find_requisition_pages(all_pages: Dict[str, str], nup_id: str = "") -> List[int]:
     """
     Identifica as páginas que compõem a peça da requisição.
 
@@ -366,7 +366,6 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
       (ex.: "1.", "2.") ou referências claras à continuidade da requisição.
     - Para ao detectar página de instrumento (edital/contrato) ou fim da requisição.
     """
-    print("STAGE2 DEBUG | Iniciando busca de páginas da requisição", flush=True)
     page_items: List[Tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
@@ -416,7 +415,6 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
             "Stage2: nenhuma página de requisição identificada. Candidatos avaliados: %s",
             debug_candidates,
         )
-        print("STAGE2 DEBUG | Retornando páginas: []", flush=True)
         return []
 
     requisition_pages: List[int] = [start_page]
@@ -447,11 +445,6 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
             break
         text = (all_pages.get(f"pagina_{idx}") or "") if not isinstance(text, str) else text
         page_text = text or ""
-        print(
-            f"STAGE2 DEBUG | Página {idx}: is_instrument={_is_instrument_page(page_text)}, "
-            f"is_end={_is_requisition_end(page_text)}, is_continuation={_looks_like_continuation(page_text)}",
-            flush=True,
-        )
         if _is_instrument_page(page_text):
             break
         if _is_requisition_end(page_text):
@@ -469,11 +462,10 @@ def find_requisition_pages(all_pages: Dict[str, str]) -> List[int]:
         debug_candidates,
     )
 
-    print(f"STAGE2 DEBUG | Retornando páginas: {requisition_pages}", flush=True)
     return requisition_pages
 
 
-def extract_instrument_and_uasg(text: str) -> Dict[str, Any]:
+def extract_instrument_and_uasg(text: str, nup_id: str = "") -> Dict[str, Any]:
     """
     Extrai instrumento (tipo + número) e UASG (código + nome) do texto.
     Normalmente aparecem no primeiro parágrafo/tópico.
@@ -484,10 +476,7 @@ def extract_instrument_and_uasg(text: str) -> Dict[str, Any]:
     flat = _normalize_for_regex(text)
     head = flat[:4000]
 
-    print("STAGE2 DEBUG | tópico 1 (primeiros 500 chars):", head[:500])
-
     m_inst = INSTRUMENTO_REGEX.search(head)
-    print("STAGE2 DEBUG | instrumento match:", m_inst.group(0) if m_inst else None)
     if m_inst:
         tipo_raw, numero = m_inst.group(1), m_inst.group(2)
         tipo_norm = tipo_raw.lower()
@@ -504,19 +493,10 @@ def extract_instrument_and_uasg(text: str) -> Dict[str, Any]:
         instrumento = {"tipo": tipo, "numero": numero.strip()}
 
         after = head[m_inst.end() : m_inst.end() + 900]
-        print("STAGE2 DEBUG | trecho busca UASG (após instrumento):", after[:500])
 
         m_uasg = UASG_AFTER_INSTRUMENTO_REGEX.search(after)
-        print(
-            "STAGE2 DEBUG | UASG regex (após instrumento) match:",
-            m_uasg.group(0) if m_uasg else None,
-        )
         if not m_uasg:
             m_uasg = CANDIDATE_UASG_FLEX_REGEX.search(after)
-            print(
-                "STAGE2 DEBUG | UASG regex flex match:",
-                m_uasg.group(0) if m_uasg else None,
-            )
 
         if m_uasg:
             codigo, nome = m_uasg.group(1), m_uasg.group(2)
@@ -527,10 +507,6 @@ def extract_instrument_and_uasg(text: str) -> Dict[str, Any]:
     else:
         # Mesmo sem instrumento, tenta identificar UASG no cabeçalho/tópico 1
         m_uasg = CANDIDATE_UASG_FLEX_REGEX.search(head)
-        print(
-            "STAGE2 DEBUG | UASG (sem instrumento) match:",
-            m_uasg.group(0) if m_uasg else None,
-        )
         if m_uasg:
             codigo, nome = m_uasg.group(1), m_uasg.group(2)
             uasg = {
@@ -538,6 +514,12 @@ def extract_instrument_and_uasg(text: str) -> Dict[str, Any]:
                 "nome": format_om_name(_normalize_whitespace(nome)),
             }
 
+    inst_tipo = instrumento.get("tipo") or ""
+    inst_num = instrumento.get("numero") or ""
+    inst_str = f"{inst_tipo} {inst_num}".strip() or "?"
+    uasg_cod = uasg.get("codigo") or ""
+    uasg_nome = (uasg.get("nome") or "").strip() or "?"
+    print(f"[Stage2][{nup_id}] Instrumento: {inst_str} | UASG: {uasg_cod} - {uasg_nome}", flush=True)
     return {"instrumento": instrumento, "uasg": uasg}
 
 
@@ -868,6 +850,7 @@ def extract_items_table(
     pdf_path: str | Path | None = None,
     req_pages: List[int] | None = None,
     image_pages: List[int] | None = None,
+    nup_id: str = "",
 ) -> Tuple[List[Stage2Item], bool, Optional[float], Optional[str], Optional[str]]:
     """
     Extrai a tabela de itens da requisição.
@@ -878,10 +861,6 @@ def extract_items_table(
       envia as imagens ao Gemini Vision (_generate_with_images).
     - Caso não haja texto nem imagens, retorna lista vazia.
     """
-    print(
-        f"STAGE2 DEBUG | extract_items_table chamada com req_pages={req_pages}, image_pages={image_pages}, pdf_path={pdf_path}",
-        flush=True,
-    )
     combined = "\n\n".join(pages_text or []).strip()
     req_pages = req_pages or []
     image_pages = image_pages or []
@@ -909,10 +888,6 @@ def extract_items_table(
     prompt_base = STAGE2_TABLE_PROMPT + "\n\nTEXTO DA TABELA:\n" + (
         combined or "(sem texto extraído; será usado fallback Azure ou Vision se disponível)"
     )
-    print(
-        f"STAGE2 DEBUG | páginas com imagem na requisição: {[p for p in (req_pages or []) if p in set(image_pages or [])]}",
-        flush=True,
-    )
     try:
         result, _, _ = proc._generate(prompt_base, "stage2_table")  # type: ignore[attr-defined]
     except Exception as exc:  # noqa: BLE001
@@ -925,76 +900,58 @@ def extract_items_table(
     items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
 
     if not items or len(items) == 0:
-        print("STAGE2 DEBUG | 0 itens extraídos na primeira tentativa.", flush=True)
-        print(
-            f"STAGE2 DEBUG | Status Azure Check -> pdf_path={bool(pdf_path)}, req_pages={bool(req_pages)}, "
-            f"func_azure={bool(extract_table_text_with_azure)}, func_pages={bool(get_pages_with_large_images)}",
-            flush=True,
-        )
-
-        # TENTATIVA 2: AZURE
+        print(f"[Stage2][{nup_id}] 0 itens na 1ª tentativa (Gemini texto)", flush=True)
+        # TENTATIVA 2: AZURE (apenas se houver páginas com imagem grande + âncora)
         if pdf_path and req_pages and extract_table_text_with_azure and get_pages_with_large_images:
-            print("STAGE2 DEBUG | Entrando no bloco do AZURE...", flush=True)
-            try:
-                pages_with_imgs = get_pages_with_large_images(pdf_path, req_pages)
-                print(f"STAGE2 DEBUG | Páginas selecionadas para Azure: {pages_with_imgs}", flush=True)
+            pages_with_imgs = get_pages_with_large_images(pdf_path, req_pages)
+            if not pages_with_imgs:
+                print(
+                    f"[Stage2][{nup_id}] Nenhuma página com imagem grande → pulando Azure",
+                    flush=True,
+                )
+            else:
+                try:
+                    azure_tsvs: List[str] = []
+                    for p_num in pages_with_imgs:
+                        img_b64 = page_to_base64(pdf_path, p_num)
+                        if img_b64:
+                            tsv = extract_table_text_with_azure(img_b64)
+                            if tsv:
+                                azure_tsvs.append(tsv)
 
-                azure_tsvs: List[str] = []
-                for p_num in pages_with_imgs:
-                    img_b64 = page_to_base64(pdf_path, p_num)
-                    if img_b64:
-                        print(f"STAGE2 DEBUG | Enviando página {p_num} para o Azure API...", flush=True)
-                        tsv = extract_table_text_with_azure(img_b64)
-                        if tsv:
-                            azure_tsvs.append(tsv)
-
-                azure_tsv_combined = "\n".join(azure_tsvs)
-                if azure_tsv_combined.strip():
-                    print(
-                        "STAGE2 DEBUG | TSV do Azure recebido com sucesso. Enviando ao Gemini para estruturação.",
-                        flush=True,
-                    )
-                    prompt_azure = (
-                        STAGE2_TABLE_PROMPT
-                        + "\n\nTEXTO DA TABELA (TSV do Azure):\n"
-                        + azure_tsv_combined
-                    )
-                    result_azure, _, _ = proc._generate(  # type: ignore[attr-defined]
-                        prompt_azure, "stage2_table_azure"
-                    )
-                    if isinstance(result_azure, dict):
-                        items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
-                            result_azure
+                    azure_tsv_combined = "\n".join(azure_tsvs)
+                    if azure_tsv_combined.strip():
+                        prompt_azure = (
+                            STAGE2_TABLE_PROMPT
+                            + "\n\nTEXTO DA TABELA (TSV do Azure):\n"
+                            + azure_tsv_combined
                         )
-                        if items:
-                            print(
-                                f"[Stage 2] Azure TSV fallback acionado e extraiu {len(items)} itens.",
-                                flush=True,
+                        result_azure, _, _ = proc._generate(  # type: ignore[attr-defined]
+                            prompt_azure, "stage2_table_azure"
+                        )
+                        if isinstance(result_azure, dict):
+                            items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
+                                result_azure
                             )
-                            print(
-                                f"STAGE2 DEBUG | Resultado da extração: {len(items)} itens, fornecedor={fornecedor}, cnpj={cnpj}",
-                                flush=True,
-                            )
-                            return (
-                                items,
-                                True,
-                                float(valor_total_geral) if valor_total_geral is not None else None,
-                                fornecedor,
-                                cnpj,
-                            )
-                else:
-                    print("STAGE2 DEBUG | Azure retornou TSV vazio.", flush=True)
-            except Exception as e:
-                print(f"STAGE2 DEBUG | Erro durante a execução do Azure: {e}", flush=True)
-        else:
-            print(
-                "STAGE2 DEBUG | Bloco do Azure foi ignorado por falta de dependências ou parâmetros!",
-                flush=True,
-            )
+                            if items:
+                                print(f"[Stage2][{nup_id}] Azure fallback: {len(items)} itens extraídos", flush=True)
+                                return (
+                                    items,
+                                    True,
+                                    float(valor_total_geral) if valor_total_geral is not None else None,
+                                    fornecedor,
+                                    cnpj,
+                                )
+                    if not items or len(items) == 0:
+                        print(
+                            f"[Stage2][{nup_id}] Azure: 0 itens → acionando Vision fallback",
+                            flush=True,
+                        )
+                except Exception as e:
+                    print(f"[Stage2][{nup_id}] Erro Azure: {e}", flush=True)
 
         # TENTATIVA 3: GEMINI VISION (só roda se o Azure falhou ou não retornou itens)
         if not items or len(items) == 0:
-            print("[Stage 2] Vision fallback acionado.", flush=True)
             if pdf_path and req_pages and page_to_base64:
                 fallback_images: List[str] = []
                 for p in req_pages:
@@ -1014,11 +971,16 @@ def extract_items_table(
                             items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
                                 result_fb
                             )
+                            if items:
+                                print(
+                                    f"[Stage2][{nup_id}] Vision fallback: {len(items)} item(ns) extraído(s)",
+                                    flush=True,
+                                )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Vision fallback falhou no estágio 2: %s", exc)
 
     print(
-        f"STAGE2 DEBUG | Resultado da extração: {len(items)} itens, fornecedor={fornecedor}, cnpj={cnpj}",
+        f"[Stage2][{nup_id}] Resultado: {len(items)} itens, fornecedor={fornecedor or '?'}, cnpj={cnpj or '?'}",
         flush=True,
     )
     return (
@@ -1216,6 +1178,8 @@ def run(
     all_pages: Dict[str, str],
     pdf_path: str | Path | None = None,
     image_pages: List[int] | None = None,
+    total_pages: int = 0,
+    nup_id: str = "",
 ) -> Dict[str, Any]:
     """
     Executa o Estágio 2 usando todas as páginas extraídas.
@@ -1224,6 +1188,8 @@ def run(
         all_pages: mapa "pagina_n" -> texto bruto.
         pdf_path: caminho do PDF original (para conversão de páginas-imagem).
         image_pages: números das páginas que são imagem (para Vision quando a tabela estiver nelas).
+        total_pages: total de páginas do PDF (opcional).
+        nup_id: identificador da análise para logs (ex.: primeiros 11 chars do NUP).
     """
     if not all_pages:
         result = Stage2Result(
@@ -1235,8 +1201,8 @@ def run(
         )
         return result.model_dump()
 
-    requisition_pages = find_requisition_pages(all_pages)
-    print("STAGE2 DEBUG | páginas identificadas como requisição:", requisition_pages)
+    requisition_pages = find_requisition_pages(all_pages, nup_id=nup_id)
+    print(f"[Stage2][{nup_id}] Req páginas: {requisition_pages}", flush=True)
     if not requisition_pages:
         result = Stage2Result(
             status="error",
@@ -1254,7 +1220,7 @@ def run(
 
     requisition_text = "\n\n".join(texts)
 
-    core = extract_instrument_and_uasg(requisition_text)
+    core = extract_instrument_and_uasg(requisition_text, nup_id=nup_id)
     instrumento_data = core.get("instrumento") or {}
     uasg_data = core.get("uasg") or {}
 
@@ -1272,10 +1238,10 @@ def run(
 
     try:
         items, extracted_by_ai, valor_total_geral, fornecedor_tab, cnpj_tab = extract_items_table(
-            texts, pdf_path=pdf_path, req_pages=requisition_pages, image_pages=image_pages or [],
+            texts, pdf_path=pdf_path, req_pages=requisition_pages, image_pages=image_pages or [], nup_id=nup_id,
         )
     except Exception as exc:
-        print(f"STAGE2 DEBUG | ERRO em extract_items_table: {exc}", flush=True)
+        print(f"[Stage2][{nup_id}] ERRO em extract_items_table: {exc}", flush=True)
         traceback.print_exc()
         items, extracted_by_ai, valor_total_geral, fornecedor_tab, cnpj_tab = [], False, None, None, None
 

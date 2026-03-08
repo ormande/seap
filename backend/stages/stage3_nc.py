@@ -209,20 +209,24 @@ def _apply_deduplication_and_recalc(
     data: Dict[str, Any],
     destinos_key: str = "destinos",
     valor_total_key: str = "valor_total",
+    nup_id: str = "",
 ) -> None:
     """Aplica deduplicate_events aos destinos e recalcula valor_total com prints de debug."""
     destinos = data.get(destinos_key) or []
     if not destinos:
         return
-    print(f"[Stage3] Antes da deduplicação: {len(destinos)} destinos")
+    antes = len(destinos)
     destinos_deduplicados = deduplicate_events(destinos)
-    print(f"[Stage3] Após deduplicação: {len(destinos_deduplicados)} destinos")
+    depois = len(destinos_deduplicados)
     data[destinos_key] = destinos_deduplicados
     valor_total = sum(
         float(_safe_decimal(d.get("valor")) or 0) for d in destinos_deduplicados
     )
     data[valor_total_key] = valor_total
-    print(f"[Stage3] Valor total recalculado: {valor_total}")
+    print(
+        f"[Stage3][{nup_id}] Dedup: {antes} -> {depois} destinos, total=R${valor_total:.2f}",
+        flush=True,
+    )
 
 
 def _group_nc_pages(nc_pages: List[Dict[str, Any]]) -> List[List[int]]:
@@ -253,7 +257,6 @@ def _group_nc_pages(nc_pages: List[Dict[str, Any]]) -> List[List[int]]:
     if current_group:
         groups.append(current_group)
 
-    print("[Stage3] Grupos de páginas de NC formados:", groups)
     logger.debug("Stage3: grupos de páginas de NC formados: %s", groups)
     return groups
 
@@ -264,6 +267,7 @@ def find_nc_pages(
     pdf_path: Optional[str] = None,
     total_pages: int = 0,
     req_pages: Optional[List[int]] = None,
+    nup_id: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Identifica páginas que contêm NCs e agrupa em conjuntos por NC.
@@ -309,10 +313,27 @@ def find_nc_pages(
 
     nc_pages_meta: List[Dict[str, Any]] = []
     nc_groups: List[Dict[str, Any]] = []
+    ignored_pages: List[int] = []
+    identified_pages: List[int] = []
+    discarded_pages: List[int] = []
 
-    # Debug bruto: mostra início do texto de cada página.
+    NC_KEYWORDS = [
+        "Nota de Crédito", "SIAFI", "NC", "UG Emitente", "Destino",
+        "NÚMERO", "VALOR TOTAL",
+    ]
+
     for page_num_str, text in all_pages.items():
-        print(f"[Stage3 RAW] Página {page_num_str}: {repr((text or '')[:300])}")
+        t = text or ""
+        char_count = len(t)
+        keywords_found = [
+            kw for kw in NC_KEYWORDS
+            if kw.upper() in t.upper()
+        ]
+        pg_short = page_num_str.replace("pagina_", "")
+        print(
+            f"[Stage3][{nup_id}] pg{pg_short}: {char_count} chars, keywords={keywords_found if keywords_found else '[]'}",
+            flush=True,
+        )
 
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
@@ -337,16 +358,12 @@ def find_nc_pages(
         ]
         has_negative = bool(negative_hits)
 
-        print(
-            f"[Stage3] Página {page_num}: "
-            f"negativas={len(negative_hits)} ({negative_hits}), "
-            f"SIAFI_score={siafi_score}, Web_score={web_score}"
-        )
-
         if has_negative and siafi_score < 3:
+            discarded_pages.append(page_num)
             print(
-                f"[Stage3] Página {page_num} descartada (âncora negativa forte, "
-                f"SIAFI_score={siafi_score})"
+                f"[Stage3][{nup_id}] pg{page_num} DESCARTADA "
+                f"(âncora negativa: {len(negative_hits)}, SIAFI:{siafi_score})",
+                flush=True,
             )
             continue
 
@@ -360,15 +377,22 @@ def find_nc_pages(
                     "web_score": web_score,
                 }
             )
+            identified_pages.append(page_num)
             print(
-                f"[Stage3] Página {page_num} identificada como NC "
-                f"(formato={fmt}, SIAFI:{siafi_score}, Web:{web_score})"
+                f"[Stage3][{nup_id}] pg{page_num} -> NC ENCONTRADA "
+                f"(formato={fmt}, SIAFI:{siafi_score}, Web:{web_score})",
+                flush=True,
             )
         else:
-            print(
-                f"[Stage3] Página {page_num} ignorada "
-                f"(SIAFI:{siafi_score}, Web:{web_score})"
-            )
+            ignored_pages.append(page_num)
+
+    print(
+        f"[Stage3][{nup_id}] Varredura NC: "
+        f"{len(identified_pages)} NC(s) encontrada(s) {identified_pages}, "
+        f"{len(discarded_pages)} descartada(s) {discarded_pages}, "
+        f"{len(ignored_pages)} ignorada(s)",
+        flush=True,
+    )
 
     groups = _group_nc_pages(nc_pages_meta)
     for group in groups:
@@ -395,12 +419,12 @@ def find_nc_pages(
             all_pages,
             exclude_pages=req_pages or [],
             total_pages=total_pages,
+            nup_id=nup_id,
         )
         if candidate_pages:
-            vision_groups = extract_ncs_from_images_batch(pdf_path, candidate_pages)
+            vision_groups = extract_ncs_from_images_batch(pdf_path, candidate_pages, nup_id=nup_id)
             nc_groups.extend(vision_groups)
 
-    print("[Stage3] Grupos finais de páginas de NC:", [g["pages"] for g in nc_groups])
     return nc_groups
 
 
@@ -477,7 +501,6 @@ def _parse_siafi_header(text: str) -> Dict[str, Optional[str]]:
         "ug_emitente": ug_emitente,
         "ug_favorecida": ug_favorecida,
     }
-    print("STAGE3 DEBUG | cabeçalho SIAFI extraído:", header)
     return header
 
 
@@ -544,18 +567,26 @@ def _parse_siafi_events(text: str) -> List[Dict[str, Any]]:
             nd_map[nd] = ev
 
     deduped = list(nd_map.values())
-    print("STAGE3 DEBUG | eventos SIAFI parseados (deduplicados por ND):", deduped)
     return deduped
 
 
-def _parse_web_header(text: str) -> Dict[str, Optional[str]]:
+def _parse_web_header(text: str, nup_id: str = "") -> Dict[str, Optional[str]]:
+    """Extrai número da NC e UG emitente do cabeçalho Web (wrapper que loga)."""
+    result = _parse_web_header_impl(text)
+    print(
+        f"[Stage3][{nup_id}] NC web header: numero={result.get('numero_nc')}, ug={result.get('ug_emitente')}",
+        flush=True,
+    )
+    return result
+
+
+def _parse_web_header_impl(text: str) -> Dict[str, Optional[str]]:
     """
     Extrai número da NC e UG emitente do cabeçalho Web.
     """
     ug_emitente: Optional[str] = None
     numero_nc: Optional[str] = None
 
-    # Tenta capturar UG Emitente pela linha "UG Emitente"
     m_ug_line = re.search(
         r"UG\s+Emitente[^\n]*\n([ \t]*)(\d{6})",
         text,
@@ -564,7 +595,6 @@ def _parse_web_header(text: str) -> Dict[str, Optional[str]]:
     if m_ug_line:
         ug_emitente = m_ug_line.group(2)
 
-    # Região de Ano / Tipo / Número
     m_ano_tipo = re.search(
         r"Ano\s+Tipo\s+N[úu]mero[^\n]*\n([^\n]+)",
         text,
@@ -582,21 +612,18 @@ def _parse_web_header(text: str) -> Dict[str, Optional[str]]:
             numero = int(m_vals.group(2))
             numero_nc = f"{ano}NC{numero:06d}"
 
-    # Fallback: procura padrão XXXXNCXXXXXX em qualquer lugar
     if not numero_nc:
         m_nc = NC_NUMBER_REGEX.search(text)
         if m_nc:
             numero_nc = m_nc.group(0)
 
-    header = {
+    return {
         "numero_nc": numero_nc,
         "ug_emitente": ug_emitente,
     }
-    print("STAGE3 DEBUG | cabeçalho Web extraído:", header)
-    return header
 
 
-def _parse_web_destinos(text: str) -> List[Dict[str, Any]]:
+def _parse_web_destinos(text: str, nup_id: str = "") -> List[Dict[str, Any]]:
     """
     Extrai destinos (NDs) da tabela 'Destino do Crédito' / 'Célula Orçamentária'.
     """
@@ -608,11 +635,10 @@ def _parse_web_destinos(text: str) -> List[Dict[str, Any]]:
         flags=re.IGNORECASE | re.DOTALL,
     )
     if not m_section:
-        print("STAGE3 DEBUG | seção de destino Web não encontrada")
+        print(f"[Stage3][{nup_id}] seção de destino Web não encontrada", flush=True)
         return destinos
 
     dest_text = m_section.group(1)
-    print("STAGE3 DEBUG | texto da seção de destino Web (primeiros 400 chars):", dest_text[:400])
 
     line_re = re.compile(
         r"Destino\s*\d+\s+(\d)\s+(\d{4,6})\s+(\d{7,10})\s+(\d{6})\s+(\d{6})\s+(\S+)\s+([\d.]+,\d{2})",
@@ -640,7 +666,7 @@ def _parse_web_destinos(text: str) -> List[Dict[str, Any]]:
             }
         )
 
-    print("STAGE3 DEBUG | destinos Web parseados:", destinos)
+    print(f"[Stage3][{nup_id}] NC web destinos: {len(destinos)} encontrado(s)", flush=True)
     return destinos
 
 
@@ -672,6 +698,7 @@ def _extract_with_ai(text: str) -> Dict[str, Any]:
 def _call_gemini_vision_with_fallback(
     prompt: str,
     images_base64: Optional[List[str]] = None,
+    nup_id: str = "",
 ) -> Optional[str]:
     """
     Chama o Gemini com prompt e opcionalmente várias imagens.
@@ -710,20 +737,22 @@ def _call_gemini_vision_with_fallback(
             last_error = exc
             if "429" in str(exc):
                 print(
-                    f"[Stage3] {model_name} quota excedida, tentando próximo..."
+                    f"[Stage3][{nup_id}] {model_name} quota excedida, tentando próximo...",
+                    flush=True,
                 )
                 logger.warning("Gemini 429 ao usar %s: %s", model_name, exc)
                 continue
             raise
     if last_error:
         logger.warning("Falha em todos os modelos Vision: %s", last_error)
-        print(f"[Stage3] Vision falhou após fallback: {last_error}")
+        print(f"[Stage3][{nup_id}] Vision falhou após fallback: {last_error}", flush=True)
     return None
 
 
 def extract_ncs_from_images_batch(
     pdf_path: str,
     candidate_page_numbers: List[int],
+    nup_id: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Envia TODAS as imagens candidatas numa única chamada ao Gemini.
@@ -737,10 +766,9 @@ def extract_ncs_from_images_batch(
         if img_b64:
             images_b64.append(img_b64)
         else:
-            print(f"[Stage3] Não foi possível converter página {page_num} para imagem")
+            print(f"[Stage3][{nup_id}] Não foi possível converter página {page_num} para imagem", flush=True)
     if not images_b64:
         return []
-    print(f"[Stage3] Enviando {len(images_b64)} imagem(ns) em uma única chamada Vision")
     # Informar ao modelo o número de página de cada imagem para "pages" no JSON
     pages_note = (
         f"As imagens enviadas correspondem, em ordem, às páginas do documento: "
@@ -750,6 +778,7 @@ def extract_ncs_from_images_batch(
     text = _call_gemini_vision_with_fallback(
         prompt,
         images_base64=images_b64,
+        nup_id=nup_id,
     )
     if not text:
         return []
@@ -764,12 +793,12 @@ def extract_ncs_from_images_batch(
         data = json.loads(text)
     except json.JSONDecodeError as exc:  # noqa: BLE001
         logger.warning("Resposta Vision não é JSON válido: %s", exc)
-        print(f"[Stage3] Resposta Vision inválida: {exc}")
+        print(f"[Stage3][{nup_id}] Resposta Vision inválida: {exc}", flush=True)
         return []
     ncs_found = data.get("ncs_found", 0)
     ncs_list = data.get("ncs") or []
     if not ncs_list or ncs_found == 0:
-        print("[Stage3] Nenhuma NC encontrada nas imagens")
+        print(f"[Stage3][{nup_id}] Nenhuma NC encontrada nas imagens", flush=True)
         return []
     nc_groups: List[Dict[str, Any]] = []
     for nc in ncs_list:
@@ -781,14 +810,14 @@ def extract_ncs_from_images_batch(
         # data para merge_nc_data e Stage3NC: numero_nc, ug_emitente, destinos, valor_total, confianca
         nc_data = {k: v for k, v in nc.items() if k != "pages"}
         # Deduplicação após extração por Gemini Vision
-        _apply_deduplication_and_recalc(nc_data)
+        _apply_deduplication_and_recalc(nc_data, nup_id=nup_id)
         nc_groups.append({
             "pages": pages,
             "format": "image_siafi",
             "data": nc_data,
             "method": "gemini_vision",
         })
-        print(f"[Stage3] NC extraída via Vision (páginas {pages})")
+        print(f"[Stage3][{nup_id}] NC extraída via Vision (páginas {pages})", flush=True)
     return nc_groups
 
 
@@ -797,6 +826,7 @@ def filter_candidate_pages(
     all_pages: Dict[str, str],
     exclude_pages: Optional[List[int]] = None,
     total_pages: int = 0,
+    nup_id: str = "",
 ) -> List[int]:
     """
     Filtra páginas-imagem ANTES de enviar ao Gemini: descarta as que
@@ -820,34 +850,29 @@ def filter_candidate_pages(
     filtered: List[int] = []
     for page_num in image_pages:
         if page_num in exclude_set:
-            print(f"[Stage3] Página {page_num} ignorada (já identificada por outro estágio)")
             continue
         # Descartar páginas muito no início (1-3) ou últimas 2
         if page_num <= 3:
-            print(f"[Stage3] Página {page_num} ignorada (início do documento)")
             continue
         if total_pages >= 2 and page_num >= total_pages - 1:
-            print(f"[Stage3] Página {page_num} ignorada (final do documento)")
             continue
         key = f"pagina_{page_num}"
         text = (all_pages.get(key) or "").strip()
         if pattern.search(text):
-            print(f"[Stage3] Página {page_num} ignorada (rodapé/texto indica certidão ou despacho)")
             continue
         filtered.append(page_num)
     filtered.sort()
-    print(f"[Stage3] Páginas-imagem candidatas após filtro: {filtered}")
     return filtered
 
 
-def extract_nc_web(text: str) -> Dict[str, Any]:
+def extract_nc_web(text: str, nup_id: str = "") -> Dict[str, Any]:
     """
     Extrai campos de NC em formato web (modelos 1 e 4).
 
     Implementação principal por regex, com fallback para IA quando necessário.
     """
-    header = _parse_web_header(text)
-    destinos = _parse_web_destinos(text)
+    header = _parse_web_header(text, nup_id=nup_id)
+    destinos = _parse_web_destinos(text, nup_id=nup_id)
 
     if not header.get("numero_nc") and not destinos:
         # Fallback completo para IA
@@ -859,13 +884,12 @@ def extract_nc_web(text: str) -> Dict[str, Any]:
         "destinos": destinos,
     }
     # Deduplicação após parse web (destinos)
-    _apply_deduplication_and_recalc(data)
+    _apply_deduplication_and_recalc(data, nup_id=nup_id)
 
-    print("STAGE3 DEBUG | dados Web extraídos (antes do merge):", data)
     return data
 
 
-def extract_nc_siafi(text: str) -> Dict[str, Any]:
+def extract_nc_siafi(text: str, nup_id: str = "") -> Dict[str, Any]:
     """
     Extrai campos de NC em formato SIAFI (modelos 2 e 3).
 
@@ -900,9 +924,8 @@ def extract_nc_siafi(text: str) -> Dict[str, Any]:
         "destinos": destinos,
     }
     # Deduplicação após parse_siafi_events
-    _apply_deduplication_and_recalc(data)
+    _apply_deduplication_and_recalc(data, nup_id=nup_id)
 
-    print("STAGE3 DEBUG | dados SIAFI extraídos (antes do merge):", data)
     return data
 
 
@@ -1007,6 +1030,7 @@ def run(
     pdf_path: Optional[str] = None,
     image_pages: Optional[List[int]] = None,
     total_pages: int = 0,
+    nup_id: str = "",
 ) -> Dict[str, Any]:
     """
     Executa o Estágio 3 usando todas as páginas extraídas.
@@ -1017,6 +1041,7 @@ def run(
         pdf_path: caminho do PDF (para converter páginas-imagem via Vision).
         image_pages: lista de números de página que são imagens (1-indexed).
         total_pages: total de páginas do PDF (para filtro de páginas-imagem).
+        nup_id: identificador da análise para logs.
     """
     if not all_pages:
         result = Stage3Result(status="error", ncs=[])
@@ -1029,6 +1054,7 @@ def run(
         pdf_path=pdf_path,
         total_pages=total_pages,
         req_pages=req_pages_list,
+        nup_id=nup_id,
     )
     if not nc_groups:
         result = Stage3Result(status="error", ncs=[])
@@ -1047,8 +1073,8 @@ def run(
             nc_raw = group["data"]
             fmt = "image_siafi"
             print(
-                "[Stage3] Usando NC extraída por Vision para páginas",
-                group_pages,
+                f"[Stage3][{nup_id}] NC formato: vision | pg {group_pages}",
+                flush=True,
             )
         else:
             texts = [
@@ -1063,27 +1089,27 @@ def run(
                 fmt,
             )
             print(
-                "[Stage3] Formato detectado para grupo de páginas",
-                group_pages,
-                "=>",
-                fmt,
-            )
-            print(
-                "[Stage3] Trecho bruto da NC (primeiros 600 chars):",
-                nc_text[:600],
+                f"[Stage3][{nup_id}] NC formato: {fmt} | pg {group_pages}",
+                flush=True,
             )
             if fmt in ("siafi_complete", "siafi_partial", "siafi"):
-                nc_raw = extract_nc_siafi(nc_text)
+                nc_raw = extract_nc_siafi(nc_text, nup_id=nup_id)
             elif fmt in ("web_complete", "web_standard", "web"):
-                nc_raw = extract_nc_web(nc_text)
+                nc_raw = extract_nc_web(nc_text, nup_id=nup_id)
             else:
                 nc_raw = _extract_with_ai(nc_text)
+            if nc_raw:
+                print(
+                    f"[Stage3][{nup_id}] NC bruta: {len(nc_text)} chars, número={nc_raw.get('numero_nc') or '?'}, UG={nc_raw.get('ug_emitente') or '?'}",
+                    flush=True,
+                )
 
         # Fallback Vision se extração por texto falhou ou retornou sem dados úteis
         if not nc_raw or (not nc_raw.get("numero_nc") and not nc_raw.get("destinos")):
             if pdf_path:
                 print(
-                    f"[Stage3] Extração por texto insuficiente para páginas {group_pages}. Tentando Vision..."
+                    f"[Stage3][{nup_id}] Extração por texto insuficiente para pg {group_pages}. Tentando Vision...",
+                    flush=True,
                 )
                 images_b64 = []
                 for p in group_pages:
@@ -1100,7 +1126,7 @@ def run(
                         + nc_text_for_vision
                     )
                     vision_text = _call_gemini_vision_with_fallback(
-                        vision_prompt, images_base64=images_b64
+                        vision_prompt, images_base64=images_b64, nup_id=nup_id
                     )
                     if vision_text:
                         try:
@@ -1112,12 +1138,13 @@ def run(
                                     lines = lines[:-1]
                                 vision_text = "\n".join(lines)
                             nc_raw = json.loads(vision_text)
-                            _apply_deduplication_and_recalc(nc_raw)
+                            _apply_deduplication_and_recalc(nc_raw, nup_id=nup_id)
                             print(
-                                f"[Stage3] Vision extraiu NC com sucesso para páginas {group_pages}"
+                                f"[Stage3][{nup_id}] Vision extraiu NC para pg {group_pages}",
+                                flush=True,
                             )
                         except (json.JSONDecodeError, Exception) as exc:  # noqa: BLE001
-                            print(f"[Stage3] Falha no parse do Vision: {exc}")
+                            print(f"[Stage3][{nup_id}] Falha no parse do Vision: {exc}", flush=True)
 
         if not nc_raw:
             continue

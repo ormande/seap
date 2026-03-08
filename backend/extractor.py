@@ -47,8 +47,9 @@ def detect_image_pages(pdf_path: str | Path) -> List[int]:
             if len(clean) < 100:
                 image_pages.append(i + 1)  # 1-indexed
                 print(
-                    f"[Extractor] Página {i+1}: IMAGEM detectada "
-                    f"(apenas {len(clean)} chars de texto)"
+                    f"[Ext][] Página {i+1}: IMAGEM detectada "
+                    f"(apenas {len(clean)} chars de texto)",
+                    flush=True,
                 )
     return image_pages
 
@@ -75,7 +76,7 @@ def page_to_base64(pdf_path: str | Path, page_number: int) -> str:
             images[0].save(buffer, format="PNG")
             return base64.b64encode(buffer.getvalue()).decode("utf-8")
     except Exception as exc:  # noqa: BLE001
-        print(f"[Extractor] Erro ao converter página {page_number} para imagem: {exc}")
+        print(f"[Ext][] Erro ao converter página {page_number} para imagem: {exc}", flush=True)
     return ""
 
 
@@ -83,15 +84,21 @@ def get_pages_with_large_images(
     pdf_path: str | Path, candidate_pages: list[int]
 ) -> list[int]:
     """
-    Retorna as páginas (1-indexed) para enviar ao Azure Document Intelligence:
-    âncora "6. Material... a ser adquirido/contratado", ou imagem grande, ou pouco texto.
-    Se nada for detectado, retorna todas as candidate_pages como fallback.
+    Retorna as páginas (1-indexed) que contêm tabelas como IMAGEM e devem
+    ser enviadas ao Azure Document Intelligence para OCR.
+
+    Critério principal: página com imagem grande + âncora "6. Material...".
+    Fallback: página com imagem grande (sem âncora).
+    Se nenhuma página tem imagem grande, retorna [] (Azure não é necessário).
     """
-    result: list[int] = []
+    primary: list[int] = []  # imagem grande + âncora
+    fallback: list[int] = []  # imagem grande sem âncora
+
     anchor_pattern = re.compile(
         r"6\.\s*Material(?:/Servi[çc]o)?\s+a\s+ser\s+(?:adquirido|contratado)",
         re.IGNORECASE,
     )
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num in candidate_pages:
@@ -101,21 +108,39 @@ def get_pages_with_large_images(
                         img.get("width", 0) > 200 and img.get("height", 0) > 100
                         for img in (page.images or [])
                     )
+
+                    if not has_large_image:
+                        continue
+
                     text = page.extract_text() or ""
                     has_anchor = bool(anchor_pattern.search(text))
-                    if has_anchor or has_large_image or len(text.strip()) < 1500:
-                        result.append(page_num)
+
+                    if has_anchor:
+                        primary.append(page_num)
                         print(
-                            f"[Extractor] Página {page_num} selecionada para o Azure "
-                            f"(Âncora: {has_anchor}, Img: {has_large_image})"
+                            f"[Ext][] Página {page_num} selecionada para Azure "
+                            f"(Âncora: True, Img: True)",
+                            flush=True,
+                        )
+                    else:
+                        fallback.append(page_num)
+                        print(
+                            f"[Ext][] Página {page_num} candidata fallback Azure "
+                            f"(Âncora: False, Img: True)",
+                            flush=True,
                         )
                 except Exception as e:
-                    print(f"[Extractor] Erro ao ler página {page_num}: {e}")
+                    print(f"[Ext][] Erro ao ler página {page_num}: {e}", flush=True)
 
-        return result if result else candidate_pages
+        if primary:
+            return primary
+        if fallback:
+            return fallback
+        return []
+
     except Exception as e:
-        print(f"[Extractor] Erro crítico ao abrir PDF para imagens: {e}")
-        return candidate_pages
+        print(f"[Ext][] Erro crítico ao abrir PDF: {e}", flush=True)
+        return []
 
 
 def detect_page_type(page: pdfplumber.page.Page) -> PageType:
