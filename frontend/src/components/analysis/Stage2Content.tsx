@@ -102,16 +102,25 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
         accessorKey: 'nd_si',
         cell: ({ row }) => {
           const norm = row.original.nd_si;
+          const display = row.original.nd_si_display;
           const original = row.original.nd_si_original;
-          if (!norm && !original) return '—';
-          const display = norm ?? original ?? '—';
+          const raw = row.original.nd_si_raw;
+
+          if (!display && !norm && !original && !raw) return '—';
+
+          const main = display ?? norm ?? original ?? raw ?? '—';
+
           const title =
-            original && norm && original !== norm
-              ? `Valor original: ${original}`
-              : undefined;
+            [
+              norm ? `Canônico: ${norm}` : null,
+              original ? `Original: ${original}` : null,
+              raw && raw !== original ? `Bruto: ${raw}` : null,
+            ]
+              .filter(Boolean)
+              .join(' | ') || undefined;
           return (
             <span className="text-xs" title={title}>
-              {display}
+              {main}
             </span>
           );
         },

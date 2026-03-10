@@ -526,7 +526,9 @@ async def analyze_pdf(
                         nd_cross = await nd_crosscheck.cross_check_nd_items(
                             nc_destinos=primary_nc.destinos,
                             items=stage2_result.data.itens,
-                            nd_req=None,
+                            # Usa ND agregada da requisição quando disponível;
+                            # mantém fallback por item dentro do nd_crosscheck.
+                            nd_req=stage2_result.data.nd_req,
                         )
                         stage3_result.nd_crosscheck = nd_cross
                 except Exception as exc:  # noqa: BLE001

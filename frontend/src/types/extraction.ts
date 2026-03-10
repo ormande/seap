@@ -120,11 +120,49 @@ export type Stage1Result = {
 export type Stage2Instrument = {
   tipo: string | null;
   numero: string | null;
+  confidence: number | null;
+  source: string | null;
+  matched_text: string | null;
+  normalized_text: string | null;
+  resolution_reason: string | null;
+  candidates: Record<string, unknown>[];
+};
+
+export type Stage2TipoEmpenho = {
+  value: string | null;
+  confidence: number | null;
+  source: string | null;
+  matched_text: string | null;
+  normalized_text: string | null;
+  resolution_reason: string | null;
+  candidates: Record<string, unknown>[];
+};
+
+export type Stage2CNPJDetails = {
+  value: string | null;
+  formatted_value: string | null;
+  confidence: number | null;
+  source: string | null;
+  matched_text: string | null;
+  normalized_text: string | null;
+  resolution_reason: string | null;
+  candidates: Record<string, unknown>[];
 };
 
 export type Stage2UASG = {
   codigo: string | null;
   nome: string | null;
+};
+
+export type Stage2UASGDetails = {
+  codigo: string | null;
+  nome: string | null;
+  confidence: number | null;
+  source: string | null;
+  matched_text: string | null;
+  normalized_text: string | null;
+  resolution_reason: string | null;
+  candidates: Record<string, unknown>[];
 };
 
 export type Stage2Item = {
@@ -135,7 +173,12 @@ export type Stage2Item = {
   unidade: string | null;
   quantidade: number | null;
   nd_si: string | null;
+  nd_si_display: string | null;
   nd_si_original: string | null;
+  nd_si_raw: string | null;
+  nd_si_candidates: Record<string, unknown>[];
+  nd_si_resolution_reason: string | null;
+  nd_si_ambigua: boolean | null;
   valor_unitario: number | null;
   valor_total: number | null;
 };
@@ -156,10 +199,14 @@ export type Stage2VerificacaoCalculos = {
 export type Stage2Data = {
   instrumento: Stage2Instrument | null;
   uasg: Stage2UASG | null;
+  uasg_details: Stage2UASGDetails | null;
   tipo_empenho: string | null;
+  tipo_empenho_details: Stage2TipoEmpenho | null;
   fornecedor: string | null;
   cnpj: string | null;
+  cnpj_details: Stage2CNPJDetails | null;
   valor_total: number | null;
+  nd_req: string | null;
   itens: Stage2Item[];
   verificacao_calculos: Stage2VerificacaoCalculos | null;
   extracted_by_ai: boolean;

@@ -219,6 +219,30 @@ class Stage2Instrument(BaseModel):
         default=None,
         description="Número do instrumento, ex.: 90004/2025.",
     )
+    confidence: Optional[int] = Field(
+        default=None,
+        description="Confiança calculada pelo resolvedor especializado de instrumento (0 a 100).",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Fonte/padrão que gerou o melhor candidato de instrumento.",
+    )
+    matched_text: Optional[str] = Field(
+        default=None,
+        description="Trecho do texto da requisição que originou o instrumento escolhido.",
+    )
+    normalized_text: Optional[str] = Field(
+        default=None,
+        description="Representação normalizada do instrumento escolhido.",
+    )
+    resolution_reason: Optional[str] = Field(
+        default=None,
+        description="Justificativa resumida da escolha do instrumento.",
+    )
+    candidates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de candidatos considerados pelo resolvedor especializado de instrumento.",
+    )
 
 
 class Stage2UASG(BaseModel):
@@ -231,6 +255,113 @@ class Stage2UASG(BaseModel):
     nome: Optional[str] = Field(
         default=None,
         description="Nome da OM gerenciadora associada à UASG/UG.",
+    )
+
+
+class Stage2UASGDetails(BaseModel):
+    """Trilha de diagnóstico da resolução de UASG/UG gerenciadora."""
+
+    codigo: Optional[str] = Field(
+        default=None,
+        description="Código UASG/UG resolvido pelo extrator especializado.",
+    )
+    nome: Optional[str] = Field(
+        default=None,
+        description="Nome da OM resolvido (texto original ou enriquecido pelo banco).",
+    )
+    confidence: Optional[int] = Field(
+        default=None,
+        description="Confiança calculada pelo resolvedor especializado de UASG/UG (0 a 100).",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Fonte/padrão que gerou o melhor candidato de UASG/UG.",
+    )
+    matched_text: Optional[str] = Field(
+        default=None,
+        description="Trecho do texto da requisição que originou a UASG/UG escolhida.",
+    )
+    normalized_text: Optional[str] = Field(
+        default=None,
+        description="Representação normalizada 'codigo - nome' ou similar.",
+    )
+    resolution_reason: Optional[str] = Field(
+        default=None,
+        description="Justificativa resumida da escolha da UASG/UG.",
+    )
+    candidates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de candidatos considerados pelo resolvedor especializado de UASG/UG.",
+    )
+
+
+class Stage2TipoEmpenho(BaseModel):
+    """Tipo de empenho da requisição, com trilha de diagnóstico."""
+
+    value: Optional[str] = Field(
+        default=None,
+        description="Valor canônico do tipo de empenho: Ordinário, Estimativo ou Global.",
+    )
+    confidence: Optional[int] = Field(
+        default=None,
+        description="Confiança calculada pelo resolvedor especializado de tipo de empenho (0 a 100).",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Fonte/padrão que gerou o melhor candidato de tipo de empenho.",
+    )
+    matched_text: Optional[str] = Field(
+        default=None,
+        description="Trecho do texto da requisição que originou o tipo de empenho escolhido.",
+    )
+    normalized_text: Optional[str] = Field(
+        default=None,
+        description="Representação normalizada do tipo de empenho escolhido (igual ao value canônico).",
+    )
+    resolution_reason: Optional[str] = Field(
+        default=None,
+        description="Justificativa resumida da escolha do tipo de empenho.",
+    )
+    candidates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de candidatos considerados pelo resolvedor especializado de tipo de empenho.",
+    )
+
+
+class Stage2CNPJDetails(BaseModel):
+    """Trilha de diagnóstico da resolução de CNPJ do fornecedor."""
+
+    value: Optional[str] = Field(
+        default=None,
+        description="Valor bruto/canônico usado para validação de CNPJ (apenas dígitos).",
+    )
+    formatted_value: Optional[str] = Field(
+        default=None,
+        description="CNPJ formatado no padrão XX.XXX.XXX/XXXX-XX.",
+    )
+    confidence: Optional[int] = Field(
+        default=None,
+        description="Confiança calculada pelo resolvedor especializado de CNPJ (0 a 100).",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Fonte/padrão que gerou o melhor candidato de CNPJ.",
+    )
+    matched_text: Optional[str] = Field(
+        default=None,
+        description="Trecho do texto da requisição que originou o CNPJ escolhido.",
+    )
+    normalized_text: Optional[str] = Field(
+        default=None,
+        description="Representação normalizada do CNPJ escolhido (igual ao formatted_value).",
+    )
+    resolution_reason: Optional[str] = Field(
+        default=None,
+        description="Justificativa resumida da escolha do CNPJ.",
+    )
+    candidates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de candidatos considerados pelo resolvedor especializado de CNPJ.",
     )
 
 
@@ -261,12 +392,46 @@ class Stage2Item(BaseModel):
     nd_si: Optional[str] = Field(
         default=None,
         description=(
-            "Classificação ND/SI do item em formato normalizado EE.SS (ex.: 30.24)."
+            "Classificação ND/SI canônica interna, em formato EE.SS (ex.: 30.24). "
+            "Somente preenchida quando houver par elemento/subelemento válido."
+        ),
+    )
+    nd_si_display: Optional[str] = Field(
+        default=None,
+        description=(
+            "Forma amigável de exibição da ND/SI para a UI (ex.: '30/07'), "
+            "derivada da resolução, sem substituir o valor original bruto."
         ),
     )
     nd_si_original: Optional[str] = Field(
         default=None,
-        description="Valor original de ND/SI encontrado no documento, sem normalização.",
+        description=(
+            "Valor original de ND/SI encontrado no documento/extrator, "
+            "sem embelezamento ou reformatção. Mantém exatamente o texto de origem."
+        ),
+    )
+    nd_si_raw: Optional[str] = Field(
+        default=None,
+        description=(
+            "Valor bruto de ND/SI retornado pela etapa de extração "
+            "(antes de qualquer normalização/resolução). Normalmente igual "
+            "ao nd_si_original, mas mantém o foco na saída direta do extrator."
+        ),
+    )
+    nd_si_candidates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Lista de candidatos de ND/SI considerados na resolução, incluindo "
+            "elemento, subelemento, display, canônico, score e validade."
+        ),
+    )
+    nd_si_resolution_reason: Optional[str] = Field(
+        default=None,
+        description="Motivo/resumo da escolha da ND/SI final após resolução de candidatos.",
+    )
+    nd_si_ambigua: Optional[bool] = Field(
+        default=None,
+        description="Flag indicando se a extração de ND/SI foi ambígua ou parcial.",
     )
     valor_unitario: Optional[float] = Field(
         default=None, description="Valor unitário do item (em reais)."
@@ -325,9 +490,23 @@ class Stage2Data(BaseModel):
         default=None,
         description="UASG/UG gerenciadora associada à requisição.",
     )
+    uasg_details: Optional["Stage2UASGDetails"] = Field(
+        default=None,
+        description=(
+            "Detalhamento do resolvedor especializado de UASG/UG, "
+            "incluindo confiança, fonte, texto casado e candidatos considerados."
+        ),
+    )
     tipo_empenho: Optional[str] = Field(
         default=None,
         description="Tipo de empenho: Ordinário, Estimativo ou Global.",
+    )
+    tipo_empenho_details: Optional["Stage2TipoEmpenho"] = Field(
+        default=None,
+        description=(
+            "Detalhamento do resolvedor especializado de tipo de empenho, "
+            "incluindo confiança, fonte, texto casado e candidatos considerados."
+        ),
     )
     fornecedor: Optional[str] = Field(
         default=None,
@@ -337,9 +516,23 @@ class Stage2Data(BaseModel):
         default=None,
         description="CNPJ do fornecedor, no formato XX.XXX.XXX/XXXX-XX.",
     )
+    cnpj_details: Optional["Stage2CNPJDetails"] = Field(
+        default=None,
+        description=(
+            "Detalhamento do resolvedor especializado de CNPJ, incluindo confiança, "
+            "fonte, texto casado e candidatos considerados."
+        ),
+    )
     valor_total: Optional[float] = Field(
         default=None,
         description="Valor total da requisição (em reais).",
+    )
+    nd_req: Optional[str] = Field(
+        default=None,
+        description=(
+            "ND/SI agregada da requisição (elemento/subelemento predominante, "
+            "normalizado, ex.: '30.07' ou apenas '30' quando sem subelemento)."
+        ),
     )
     itens: List[Stage2Item] = Field(
         default_factory=list,
@@ -353,6 +546,9 @@ class Stage2Data(BaseModel):
         default=False,
         description="Indica se a tabela de itens foi extraída usando IA (ex.: OCR/vision).",
     )
+
+
+Stage2Data.model_rebuild()
 
 
 class Stage2Confidence(BaseModel):
