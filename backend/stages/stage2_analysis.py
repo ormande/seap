@@ -78,14 +78,32 @@ logger = logging.getLogger(__name__)
 
 
 INSTRUMENTO_REGEX = re.compile(
-    r"por\s+meio\s+d[oe]\s+"
-    r"(Preg[aã]o\s+Eletr[oô]nico|[Cc]ontrato|[Dd]ispensa|[Ii]nexigibilidade)"
-    r"\s*n?[°ºo]?\s*(\d+/\d{2,4})",
+    r"por\s+meio\s+d[oea]\s+"
+    r"("
+    r"Preg[aã]o(?:\s+Eletr[oô]nico)?"
+    r"|[Cc]ontrato"
+    r"|[Dd]ispensa(?:\s+de\s+[Ll]icita[çc][aã]o)?"
+    r"|[Ii]nexigibilidade"
+    r"|[Cc]hamada\s+[Pp][uú]blica"
+    r"|[Aa]ta\s+de\s+[Rr]egistro\s+de\s+[Pp]re[çc]os"
+    r")"
+    r"\s*n?[°ºo.]?\s*"
+    r"(\d+/\d{2,4})",
     flags=re.IGNORECASE,
 )
 
 UASG_AFTER_INSTRUMENTO_REGEX = re.compile(
-    r"(?:UASG|UG|pela)\s*(16\d{4})\s*[–\-—]\s*(.+?)(?:\.|,|do\s+qual|$)",
+    r"(?:UASG|UG|pela)\s*\(?\s*(16\d{4})\s*\)?\s*[–\-—]\s*(.+?)(?:\.|,|do\s+qual|da\s+qual|\)|$)",
+    flags=re.IGNORECASE,
+)
+
+INSTRUMENTO_CAMPO6_REGEX = re.compile(
+    r"(?:"
+    r"(?:PE|PREG[AÃ]O(?:\s+ELETR[OÔ]NICO)?|CONTRATO|DISPENSA|CHAMADA\s+P[UÚ]BLICA)"
+    r")\s*"
+    r"(?:N[°ºo.]?\s*)?"
+    r"(\d+/\d{2,4})"
+    r"(?:[,\s]+UASG[:\s]*(16\d{4}))?",
     flags=re.IGNORECASE,
 )
 
@@ -465,10 +483,31 @@ def find_requisition_pages(all_pages: Dict[str, str], nup_id: str = "") -> List[
     return requisition_pages
 
 
+def _normalize_instrument_type(raw_type: str) -> str:
+    """Normaliza o tipo do instrumento para valor canônico."""
+    lower = raw_type.strip().lower()
+    if lower == "pe" or lower.startswith("pe "):
+        return "Pregão Eletrônico"
+    if "preg" in lower:
+        return "Pregão Eletrônico"
+    if "contrato" in lower:
+        return "Contrato"
+    if "dispensa" in lower:
+        return "Dispensa"
+    if "inexig" in lower:
+        return "Inexigibilidade"
+    if "chamada" in lower:
+        return "Chamada Pública"
+    if "ata" in lower and "registro" in lower:
+        return "Ata de Registro de Preços"
+    return raw_type.strip()
+
+
 def extract_instrument_and_uasg(text: str, nup_id: str = "") -> Dict[str, Any]:
     """
     Extrai instrumento (tipo + número) e UASG (código + nome) do texto.
     Normalmente aparecem no primeiro parágrafo/tópico.
+    Ordem: INSTRUMENTO_REGEX (tópico 1) → INSTRUMENTO_CAMPO6_REGEX (campo 6) → UASG só.
     """
     instrumento: Dict[str, Optional[str]] = {"tipo": None, "numero": None}
     uasg: Dict[str, Optional[str]] = {"codigo": None, "nome": None}
@@ -478,19 +517,10 @@ def extract_instrument_and_uasg(text: str, nup_id: str = "") -> Dict[str, Any]:
 
     m_inst = INSTRUMENTO_REGEX.search(head)
     if m_inst:
-        tipo_raw, numero = m_inst.group(1), m_inst.group(2)
-        tipo_norm = tipo_raw.lower()
-        if "preg" in tipo_norm:
-            tipo = "Pregão Eletrônico"
-        elif "contrato" in tipo_norm:
-            tipo = "Contrato"
-        elif "dispensa" in tipo_norm:
-            tipo = "Dispensa"
-        elif "inexig" in tipo_norm:
-            tipo = "Inexigibilidade"
-        else:
-            tipo = tipo_raw.strip()
-        instrumento = {"tipo": tipo, "numero": numero.strip()}
+        tipo_raw = m_inst.group(1)
+        tipo = _normalize_instrument_type(tipo_raw)
+        numero = m_inst.group(2).strip()
+        instrumento = {"tipo": tipo, "numero": numero}
 
         after = head[m_inst.end() : m_inst.end() + 900]
 
@@ -505,14 +535,32 @@ def extract_instrument_and_uasg(text: str, nup_id: str = "") -> Dict[str, Any]:
                 "nome": format_om_name(_normalize_whitespace(nome)),
             }
     else:
-        # Mesmo sem instrumento, tenta identificar UASG no cabeçalho/tópico 1
-        m_uasg = CANDIDATE_UASG_FLEX_REGEX.search(head)
-        if m_uasg:
-            codigo, nome = m_uasg.group(1), m_uasg.group(2)
-            uasg = {
-                "codigo": codigo.strip(),
-                "nome": format_om_name(_normalize_whitespace(nome)),
-            }
+        # Fallback: formato telegráfico do campo 6 (abaixo da tabela)
+        m_campo6 = INSTRUMENTO_CAMPO6_REGEX.search(head)
+        if m_campo6:
+            match_text = m_campo6.group(0)
+            tipo = _normalize_instrument_type(match_text.split()[0])
+            numero = m_campo6.group(1).strip()
+            instrumento = {"tipo": tipo, "numero": numero}
+            uasg_code = m_campo6.group(2)
+            if uasg_code:
+                uasg = {
+                    "codigo": uasg_code.strip(),
+                    "nome": format_om_name(UASG_TO_OM.get(uasg_code.strip(), "")),
+                }
+            print(
+                f"[Stage2][{nup_id}] Instrumento via campo 6: {tipo} {numero}",
+                flush=True,
+            )
+        else:
+            # Mesmo sem instrumento, tenta identificar UASG no cabeçalho/tópico 1
+            m_uasg = CANDIDATE_UASG_FLEX_REGEX.search(head)
+            if m_uasg:
+                codigo, nome = m_uasg.group(1), m_uasg.group(2)
+                uasg = {
+                    "codigo": codigo.strip(),
+                    "nome": format_om_name(_normalize_whitespace(nome)),
+                }
 
     inst_tipo = instrumento.get("tipo") or ""
     inst_num = instrumento.get("numero") or ""
