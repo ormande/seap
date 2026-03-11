@@ -269,6 +269,7 @@ REGRAS:
 - Use ponto decimal (ex: 1500.50).
 - Unidade preserva letras (Un, Sv, Kg). Catmat SÓ números. ND sempre em formato EE.SS.
 - CNPJ tem SEMPRE 14 dígitos (não confunda com NUP).
+- FORNECEDOR deve ser a RAZÃO SOCIAL vinculada ao CNPJ. Se houver nome fantasia/marca e razão social, prefira a razão social.
 - O campo "item" é o NÚMERO REAL DA 1ª COLUNA da tabela. NÃO renumere em ordem cardinal.
 - Preserve exatamente números de item não sequenciais (ex.: 2, 29, 54, 79, 204).
 - Preencha todos os campos do JSON, extraia todos os itens da tabela.
@@ -324,6 +325,37 @@ Se não encontrar algum campo, use null.
 
 def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_supplier_name(value: Any) -> Optional[str]:
+    """
+    Normaliza o nome do fornecedor para exibição/persistência consistente.
+
+    Regras:
+    - se vier como dict, prioriza razão social em vez de nome fantasia;
+    - remove espaços excedentes;
+    - persiste em caixa alta.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        value = (
+            value.get("razao_social")
+            or value.get("razão_social")
+            or value.get("nome")
+            or value.get("nome_fantasia")
+            or None
+        )
+
+    if value is None:
+        return None
+
+    normalized = _normalize_whitespace(str(value))
+    if not normalized:
+        return None
+
+    return normalized.upper()
 
 
 def format_om_name(name: str) -> str:
@@ -2486,7 +2518,7 @@ def _parse_native_item_table_hints(tsv: str) -> Dict[str, Any]:
                 flags=re.IGNORECASE,
             )
             if m:
-                fornecedor = _normalize_whitespace(m.group(1))
+                fornecedor = _normalize_supplier_name(m.group(1))
         if cnpj is None:
             cnpj_match = re.search(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", stripped)
             if cnpj_match:
@@ -2625,8 +2657,9 @@ def _merge_image_table_results(
 
     items = azure_items or vision_items
 
-    azure_fornecedor = azure_data.get("fornecedor")
-    vision_fornecedor = vision_data.get("fornecedor")
+    azure_fornecedor = _normalize_supplier_name(azure_data.get("fornecedor"))
+    vision_fornecedor = _normalize_supplier_name(vision_data.get("fornecedor"))
+    azure_fornecedor_source = str(azure_data.get("fornecedor_source") or "")
     fornecedor = azure_fornecedor or vision_fornecedor
 
     azure_cnpj = azure_data.get("cnpj")
@@ -2655,8 +2688,10 @@ def _merge_image_table_results(
     else:
         chosen_total = vision_total or azure_total or items_total
 
-    # Vision costuma ser melhor para fornecedor/CNPJ em tabela-imagem.
-    if vision_fornecedor:
+    # Vision costuma ser melhor para fornecedor/CNPJ em tabela-imagem,
+    # mas não deve sobrescrever um fornecedor explicitamente ancorado
+    # no cabeçalho da tabela extraída pelo Azure (ex.: "Nome da Empresa").
+    if vision_fornecedor and azure_fornecedor_source != "header_tsv":
         fornecedor = vision_fornecedor
     if vision_cnpj:
         cnpj = vision_cnpj
@@ -3081,7 +3116,7 @@ def _parse_table_result(
     Stage2Item, fornecedor, cnpj e valor_total_geral. Reutilizado no fluxo
     normal e no fallback Vision.
     """
-    fornecedor = result.get("fornecedor")
+    fornecedor = _normalize_supplier_name(result.get("fornecedor"))
     cnpj = _normalize_cnpj(result.get("cnpj"))
     itens_raw = result.get("itens") or []
 
@@ -3288,9 +3323,11 @@ def extract_items_table(
                                 azure_tsvs.append(tsv)
 
                     azure_tsv_combined = "\n".join(azure_tsvs)
+                    azure_header_hints = _parse_native_item_table_hints(azure_tsv_combined)
                     azure_parsed: Dict[str, Any] = {
                         "items": [],
                         "fornecedor": None,
+                        "fornecedor_source": None,
                         "cnpj": None,
                         "valor_total_geral": None,
                     }
@@ -3313,10 +3350,17 @@ def extract_items_table(
                             az_items, az_fornecedor, az_cnpj, az_total = _parse_table_result(
                                 result_azure
                             )
+                            final_az_fornecedor = az_fornecedor
+                            fornecedor_source = "model" if az_fornecedor else None
+                            if azure_header_hints.get("fornecedor"):
+                                final_az_fornecedor = azure_header_hints.get("fornecedor")
+                                fornecedor_source = "header_tsv"
+                            final_az_cnpj = az_cnpj or azure_header_hints.get("cnpj")
                             azure_parsed = {
                                 "items": az_items,
-                                "fornecedor": az_fornecedor,
-                                "cnpj": az_cnpj,
+                                "fornecedor": final_az_fornecedor,
+                                "fornecedor_source": fornecedor_source,
+                                "cnpj": final_az_cnpj,
                                 "valor_total_geral": az_total,
                             }
                             if az_items:
@@ -3929,10 +3973,7 @@ def run(
     nd_req = compute_nd_req_from_items(items)
 
     # Sanitizar fornecedor e cnpj caso venham como dict da IA
-    if isinstance(fornecedor_tab, dict):
-        fornecedor_tab = fornecedor_tab.get("nome") or fornecedor_tab.get("razao_social") or None
-        if fornecedor_tab is not None:
-            fornecedor_tab = str(fornecedor_tab)
+    fornecedor_tab = _normalize_supplier_name(fornecedor_tab)
     if isinstance(cnpj_tab, dict):
         cnpj_tab = cnpj_tab.get("numero") or cnpj_tab.get("cnpj") or None
         if cnpj_tab is not None:
@@ -3942,7 +3983,7 @@ def run(
     # - fornecedor continua vindo principalmente da tabela/IA;
     # - CNPJ prioriza o resolvedor especializado em texto nativo,
     #   com fallback para a tabela/IA quando necessário.
-    final_fornecedor = fornecedor_tab
+    final_fornecedor = _normalize_supplier_name(fornecedor_tab)
     final_cnpj = cnpj_value or cnpj_tab
 
     data = Stage2Data(
@@ -4077,9 +4118,7 @@ def run(
             if not data.tipo_empenho and tipo_ai:
                 data.tipo_empenho = tipo_ai
             if not data.fornecedor and fornecedor_ai:
-                if isinstance(fornecedor_ai, dict):
-                    fornecedor_ai = fornecedor_ai.get("nome") or fornecedor_ai.get("razao_social")
-                data.fornecedor = str(fornecedor_ai) if fornecedor_ai else None
+                data.fornecedor = _normalize_supplier_name(fornecedor_ai)
             if not data.cnpj and cnpj_ai:
                 if isinstance(cnpj_ai, dict):
                     cnpj_ai = cnpj_ai.get("numero") or cnpj_ai.get("cnpj")
