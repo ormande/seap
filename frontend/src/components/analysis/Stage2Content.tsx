@@ -38,6 +38,7 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
   onUasgNomeAdded,
 }) => {
   const [showDivergences, setShowDivergences] = useState(false);
+  const [showNdVerification, setShowNdVerification] = useState(false);
   const [uasgNomeInput, setUasgNomeInput] = useState('');
   const [uasgAdding, setUasgAdding] = useState(false);
   const [uasgError, setUasgError] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
   const items: Stage2Item[] = data?.itens ?? [];
   const divergencias: Stage2Divergencia[] =
     data?.verificacao_calculos?.divergencias ?? [];
+  const ndVerification = data?.verificacao_nd ?? null;
 
   const totalFromItems = useMemo(() => {
     return items.reduce((acc, item) => acc + (item.valor_total ?? 0), 0);
@@ -455,9 +457,28 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
             </span>
           )}
 
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-70 dark:bg-slate-500/20 dark:text-slate-200">
-            Verificação de ND — Em breve
-          </span>
+          {ndVerification ? (
+            ndVerification.todos_compativeis ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
+                ✓ ND/SI compatível
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowNdVerification((prev) => !prev)}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-500/20 dark:bg-amber-500/20 dark:text-amber-100"
+              >
+                ! Ressalvas de ND/SI
+                <span className="text-[10px]">
+                  ({ndVerification.ressalvas.length || ndVerification.itens.length})
+                </span>
+              </button>
+            )
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-70 dark:bg-slate-500/20 dark:text-slate-200">
+              Verificação de ND indisponível
+            </span>
+          )}
           <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-70 dark:bg-slate-500/20 dark:text-slate-200">
             Máscara personalizada — Em breve
           </span>
@@ -491,6 +512,72 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
                 );
               })}
             </ul>
+          </div>
+        )}
+
+        {ndVerification && !ndVerification.todos_compativeis && (
+          <div
+            className={[
+              'overflow-hidden rounded-lg border border-amber-500/40 bg-amber-500/5 text-[11px] text-amber-950 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-50',
+              showNdVerification ? 'max-h-[32rem] p-3' : 'max-h-0 p-0',
+              'transition-[max-height,padding] duration-300 ease-out',
+            ].join(' ')}
+          >
+            {ndVerification.resumo && (
+              <p className="mb-2 text-[11px] leading-relaxed">
+                {ndVerification.resumo}
+              </p>
+            )}
+
+            {ndVerification.ressalvas.length > 0 && (
+              <div className="mb-3 space-y-1">
+                <p className="font-semibold">Ressalvas:</p>
+                <ul className="space-y-1">
+                  {ndVerification.ressalvas.map((ressalva, idx) => (
+                    <li key={idx}>{ressalva}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {ndVerification.itens
+                .filter((item) => item.status !== 'compatível')
+                .map((item, idx) => (
+                  <div
+                    key={`${item.item ?? 'sem-item'}-${idx}`}
+                    className="rounded-lg border border-amber-500/30 bg-white/50 p-2 dark:bg-black/10"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">
+                        Item {item.item ?? '—'}
+                      </span>
+                      {item.nd_informada && (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800 dark:text-amber-100">
+                          ND/SI {item.nd_informada}
+                        </span>
+                      )}
+                      {item.confianca !== null && item.confianca !== undefined && (
+                        <span className="text-[10px] text-[var(--text-secondary)]">
+                          Confiança {item.confianca}%
+                        </span>
+                      )}
+                    </div>
+                    {item.justificativa && (
+                      <p className="mt-1 leading-relaxed">{item.justificativa}</p>
+                    )}
+                    {(item.subelemento_sugerido ||
+                      item.nome_subelemento_sugerido) && (
+                      <p className="mt-1 text-[10px] font-medium text-amber-900 dark:text-amber-100">
+                        Sugestão:{' '}
+                        {[item.subelemento_sugerido, item.nome_subelemento_sugerido]
+                          .filter(Boolean)
+                          .join(' — ')}
+                      </p>
+                    )}
+                  </div>
+                ))}
+            </div>
           </div>
         )}
       </div>

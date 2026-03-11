@@ -479,6 +479,64 @@ class Stage2VerificacaoCalculos(BaseModel):
     )
 
 
+class Stage2NDVerificationItem(BaseModel):
+    """Avaliação semântica de compatibilidade entre item e ND/SI."""
+
+    item: Optional[int] = Field(
+        default=None,
+        description="Número do item avaliado.",
+    )
+    nd_informada: Optional[str] = Field(
+        default=None,
+        description="ND/SI informada para o item, preferencialmente em formato de exibição.",
+    )
+    status: str = Field(
+        ...,
+        description="compatível, ressalva ou nao_avaliado.",
+    )
+    justificativa: Optional[str] = Field(
+        default=None,
+        description="Justificativa textual da análise semântica da ND/SI.",
+    )
+    subelemento_sugerido: Optional[str] = Field(
+        default=None,
+        description="Subelemento sugerido pela análise, quando houver ressalva.",
+    )
+    nome_subelemento_sugerido: Optional[str] = Field(
+        default=None,
+        description="Nome do subelemento sugerido, quando houver ressalva.",
+    )
+    confianca: Optional[int] = Field(
+        default=None,
+        description="Confiança da análise por item (0 a 100).",
+    )
+
+
+class Stage2NDVerification(BaseModel):
+    """Resultado da verificação interpretativa de ND/SI por item."""
+
+    resumo: Optional[str] = Field(
+        default=None,
+        description="Resumo geral da avaliação semântica de ND/SI do estágio 2.",
+    )
+    itens: List["Stage2NDVerificationItem"] = Field(
+        default_factory=list,
+        description="Lista de avaliações por item.",
+    )
+    todos_compativeis: bool = Field(
+        default=True,
+        description="Indica se todos os itens avaliados estão semanticamente compatíveis com a ND/SI informada.",
+    )
+    ressalvas: List[str] = Field(
+        default_factory=list,
+        description="Lista textual resumida de ressalvas relevantes encontradas.",
+    )
+    confidence: Optional[int] = Field(
+        default=None,
+        description="Confiança geral da verificação de ND/SI (0 a 100).",
+    )
+
+
 class Stage2Data(BaseModel):
     """Dados extraídos no estágio 2 (análise da peça da requisição)."""
 
@@ -542,12 +600,17 @@ class Stage2Data(BaseModel):
         default=None,
         description="Resultado da verificação automática de cálculos.",
     )
+    verificacao_nd: Optional["Stage2NDVerification"] = Field(
+        default=None,
+        description="Verificação interpretativa de compatibilidade entre ND/SI e a natureza do item.",
+    )
     extracted_by_ai: bool = Field(
         default=False,
         description="Indica se a tabela de itens foi extraída usando IA (ex.: OCR/vision).",
     )
 
 
+Stage2NDVerification.model_rebuild()
 Stage2Data.model_rebuild()
 
 

@@ -196,6 +196,24 @@ export type Stage2VerificacaoCalculos = {
   valor_total_calculado: number;
 };
 
+export type Stage2NDVerificationItem = {
+  item: number | null;
+  nd_informada: string | null;
+  status: string;
+  justificativa: string | null;
+  subelemento_sugerido: string | null;
+  nome_subelemento_sugerido: string | null;
+  confianca: number | null;
+};
+
+export type Stage2NDVerification = {
+  resumo: string | null;
+  itens: Stage2NDVerificationItem[];
+  todos_compativeis: boolean;
+  ressalvas: string[];
+  confidence: number | null;
+};
+
 export type Stage2Data = {
   instrumento: Stage2Instrument | null;
   uasg: Stage2UASG | null;
@@ -209,6 +227,7 @@ export type Stage2Data = {
   nd_req: string | null;
   itens: Stage2Item[];
   verificacao_calculos: Stage2VerificacaoCalculos | null;
+  verificacao_nd: Stage2NDVerification | null;
   extracted_by_ai: boolean;
 };
 

@@ -11,6 +11,7 @@ Responsável por:
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import sys
@@ -64,6 +65,8 @@ try:
         Stage2Divergencia,
         Stage2Instrument,
         Stage2Item,
+        Stage2NDVerification,
+        Stage2NDVerificationItem,
         Stage2Result,
         Stage2TipoEmpenho,
         Stage2CNPJDetails,
@@ -78,6 +81,8 @@ except ImportError:
         Stage2Divergencia,
         Stage2Instrument,
         Stage2Item,
+        Stage2NDVerification,
+        Stage2NDVerificationItem,
         Stage2Result,
         Stage2TipoEmpenho,
         Stage2CNPJDetails,
@@ -3620,6 +3625,155 @@ def compute_nd_req_from_items(items: List[Stage2Item]) -> Optional[str]:
     return None
 
 
+def _build_nd_verification_context(items: List[Stage2Item]) -> Dict[str, Any]:
+    """Monta contexto enxuto da tabela oficial de ND para a verificação semântica."""
+    try:
+        from ..nd_database import ND_ELEMENTS  # type: ignore[import]
+    except ImportError:
+        from nd_database import ND_ELEMENTS  # type: ignore[import]
+
+    elements_needed = sorted(
+        {
+            str(parse_nd_si(it.nd_si_raw or it.nd_si or "").get("element") or "")
+            for it in items
+            if (it.nd_si_raw or it.nd_si)
+        }
+        - {""}
+    )
+
+    nd_reference: Dict[str, Any] = {}
+    for element in elements_needed:
+        info = ND_ELEMENTS.get(element) or {}
+        nd_reference[element] = {
+            "nome": info.get("nome"),
+            "descricao": info.get("descricao"),
+            "subelementos": info.get("subelementos") or {},
+        }
+
+    items_payload: List[Dict[str, Any]] = []
+    for item in items:
+        nd_display = item.nd_si_display or item.nd_si_raw or item.nd_si
+        if not nd_display:
+            continue
+        items_payload.append(
+            {
+                "item": item.item,
+                "descricao": item.descricao_completa or item.descricao_resumida,
+                "nd_informada": nd_display,
+            }
+        )
+
+    return {
+        "itens": items_payload,
+        "nd_reference": nd_reference,
+    }
+
+
+STAGE2_ND_VERIFICATION_PROMPT = """
+Você é um auditor de despesa pública analisando se a ND/SI informada em cada item é semanticamente compatível com a descrição do item, usando a tabela oficial de ND/SI como referência.
+
+Regras:
+- Seja conservador.
+- Se a ND/SI estiver claramente compatível com a natureza do item, marque como "compatível".
+- Se houver indício forte de que o subelemento não corresponde à descrição do item, marque como "ressalva".
+- Não invente ressalvas quando a compatibilidade for plausível.
+- Use apenas os itens e a tabela oficial fornecida.
+
+Retorne APENAS JSON válido neste formato:
+{
+  "resumo": "texto curto",
+  "todos_compativeis": true,
+  "ressalvas": ["texto curto"],
+  "confidence": 90,
+  "itens": [
+    {
+      "item": 35,
+      "nd_informada": "30/07",
+      "status": "compatível",
+      "justificativa": "texto curto",
+      "subelemento_sugerido": null,
+      "nome_subelemento_sugerido": null,
+      "confianca": 95
+    }
+  ]
+}
+""".strip()
+
+
+def verify_nd_with_ai(items: List[Stage2Item]) -> Optional[Stage2NDVerification]:
+    """
+    Verifica semanticamente, com IA, se a ND/SI de cada item condiz com a
+    descrição e com a tabela oficial de ND.
+    """
+    if not items:
+        return None
+
+    items_with_nd = [it for it in items if (it.nd_si_display or it.nd_si_raw or it.nd_si)]
+    if not items_with_nd:
+        return None
+
+    try:
+        proc = GeminiProcessor()
+    except ValueError as exc:
+        logger.warning("Gemini indisponível para verificação de ND no estágio 2: %s", exc)
+        return None
+
+    context = _build_nd_verification_context(items_with_nd)
+    prompt = (
+        STAGE2_ND_VERIFICATION_PROMPT
+        + "\n\nDADOS PARA ANÁLISE:\n"
+        + json.dumps(context, ensure_ascii=False, indent=2)
+    )
+
+    try:
+        result, _, _ = proc._generate(prompt, "stage2_nd_verification")  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha na verificação de ND com IA no estágio 2: %s", exc)
+        return None
+
+    if not isinstance(result, dict):
+        return None
+
+    itens_result = result.get("itens") or []
+    verification_items: List[Stage2NDVerificationItem] = []
+    for item_raw in itens_result:
+        if not isinstance(item_raw, dict):
+            continue
+        verification_items.append(
+            Stage2NDVerificationItem(
+                item=_normalize_item_number(item_raw.get("item")),
+                nd_informada=_normalize_whitespace(str(item_raw.get("nd_informada") or "")) or None,
+                status=str(item_raw.get("status") or "nao_avaliado"),
+                justificativa=_normalize_whitespace(str(item_raw.get("justificativa") or "")) or None,
+                subelemento_sugerido=_normalize_whitespace(
+                    str(item_raw.get("subelemento_sugerido") or "")
+                )
+                or None,
+                nome_subelemento_sugerido=_normalize_whitespace(
+                    str(item_raw.get("nome_subelemento_sugerido") or "")
+                )
+                or None,
+                confianca=int(item_raw.get("confianca") or 0) or None,
+            )
+        )
+
+    confidence_raw = result.get("confidence")
+    try:
+        confidence = int(confidence_raw) if confidence_raw is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+
+    return Stage2NDVerification(
+        resumo=_normalize_whitespace(str(result.get("resumo") or "")) or None,
+        itens=verification_items,
+        todos_compativeis=bool(result.get("todos_compativeis", True)),
+        ressalvas=[
+            _normalize_whitespace(str(r)) for r in (result.get("ressalvas") or []) if _normalize_whitespace(str(r))
+        ],
+        confidence=confidence,
+    )
+
+
 def _build_stage2_uasg(
     codigo: Optional[str],
     nome: Optional[str],
@@ -3676,7 +3830,7 @@ def run(
             method="regex",
             data=None,
             confidence=None,
-            inactive_fields=["verificacao_nd", "mascara"],
+            inactive_fields=["mascara"],
         )
         return result.model_dump()
 
@@ -3688,7 +3842,7 @@ def run(
             method="regex",
             data=None,
             confidence=None,
-            inactive_fields=["verificacao_nd", "mascara"],
+            inactive_fields=["mascara"],
         )
         return result.model_dump()
 
@@ -3769,6 +3923,7 @@ def run(
         valor_total = float(total_dec)
 
     verificacao = verify_calculations(items, valor_total)
+    verificacao_nd = verify_nd_with_ai(items)
 
     # ND agregada da requisição (nd_req) calculada a partir das NDs finais dos itens.
     nd_req = compute_nd_req_from_items(items)
@@ -3874,6 +4029,7 @@ def run(
         nd_req=nd_req,
         itens=items,
         verificacao_calculos=verificacao,
+        verificacao_nd=verificacao_nd,
         extracted_by_ai=extracted_by_ai,
     )
 
@@ -3978,7 +4134,7 @@ def run(
         method=method,
         data=data,
         confidence=confidence,
-        inactive_fields=["verificacao_nd", "mascara"],
+        inactive_fields=["mascara"],
     )
 
     return result.model_dump()
