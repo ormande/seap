@@ -1,19 +1,33 @@
 from __future__ import annotations
 
 """
-Base de dados simplificada de Natureza de Despesa (ND) e subelementos
-relevantes para licitações.
+Base de dados de Natureza de Despesa (ND) e subelementos.
 
-Esta estrutura é usada no cruzamento ND × Itens (Estágio 3) para:
-- mapear o elemento (30, 39, 52) para um nome amigável;
-- fornecer contexto semântico ao modelo de IA;
-- sugerir subelementos coerentes com a descrição do item.
+Fonte de verdade:
+- tabela oficial exportada do fluxo atual do Comprasnet, mantida em JSON;
+- enriquecimento semântico local para apoiar o cruzamento ND × Itens.
 """
 
-from typing import Dict, Any
+from json import loads
+from pathlib import Path
+from typing import Any, Dict
 
 
-ND_ELEMENTS: Dict[str, Dict[str, Any]] = {
+_OFFICIAL_JSON_PATH = Path(__file__).with_name("nd_official_mar26.json")
+
+
+def _load_official_nd_table() -> Dict[str, Dict[str, Any]]:
+    raw = loads(_OFFICIAL_JSON_PATH.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Tabela oficial de ND inválida: raiz não é objeto JSON.")
+    return raw
+
+
+ND_CLASSES: Dict[str, Dict[str, Any]] = _load_official_nd_table()
+
+
+# Camada semântica usada pelo Stage 3 para contextualizar Material/Serviço/Equipamento.
+_ELEMENT_SEMANTICS: Dict[str, Dict[str, Any]] = {
     "30": {
         "nome": "Material de Consumo",
         "tipo": "material",
@@ -28,35 +42,6 @@ ND_ELEMENTS: Dict[str, Dict[str, Any]] = {
             "peça",
             "kit",
         ],
-        "subelementos": {
-            "01": "Combustíveis e Lubrificantes Automotivos",
-            "04": "Gás e Outros Materiais Engarrafados",
-            "05": "Explosivos e Munições",
-            "07": "Gêneros de Alimentação",
-            "09": "Material Farmacológico",
-            "10": "Material Odontológico",
-            "11": "Material Químico",
-            "14": "Material Educativo e Esportivo",
-            "16": "Material de Expediente",
-            "17": "Material de Processamento de Dados",
-            "19": "Material de Acondicionamento e Embalagem",
-            "20": "Material de Cama, Mesa e Banho",
-            "21": "Material de Limpeza e Produtos de Higienização",
-            "22": "Material de Copa e Cozinha",
-            "23": "Material de Uniformes, Tecidos e Aviamentos",
-            "24": "Material para Manutenção de Bens Imóveis",
-            "25": "Material para Manutenção de Bens Móveis",
-            "26": "Material Elétrico e Eletrônico",
-            "28": "Material de Proteção e Segurança",
-            "30": "Material para Comunicações",
-            "35": "Material Laboratorial",
-            "36": "Material Hospitalar",
-            "39": "Material para Manutenção de Veículos",
-            "42": "Ferramentas",
-            "44": "Material de Sinalização Visual e Outros",
-            "47": "Aquisição de Softwares de Base",
-            "99": "Outros Materiais de Consumo",
-        },
     },
     "39": {
         "nome": "Outros Serviços de Terceiros PJ",
@@ -75,30 +60,6 @@ ND_ELEMENTS: Dict[str, Dict[str, Any]] = {
             "consultoria",
             "treinamento",
         ],
-        "subelementos": {
-            "05": "Serviços Técnicos Profissionais",
-            "08": "Manutenção de Software",
-            "10": "Locação de Imóveis",
-            "11": "Locação de Softwares",
-            "12": "Locação de Máquinas e Equipamentos",
-            "16": "Manutenção e Conservação de Bens Imóveis",
-            "17": "Manutenção e Conservação de Máquinas e Equipamentos",
-            "19": "Manutenção e Conservação de Veículos",
-            "20": "Manutenção e Conservação de Bens Móveis",
-            "33": "Fornecimento de Alimentação",
-            "40": "Serviços de Seleção e Treinamento",
-            "42": "Serviços de Telecomunicações",
-            "43": "Serviços de Energia Elétrica",
-            "44": "Serviços de Água e Esgoto",
-            "47": "Serviços de Comunicação em Geral",
-            "49": "Serviços de Processamento de Dados",
-            "62": "Serviços de Apoio Administrativo",
-            "70": "Confecção de Uniformes, Bandeiras e Flâmulas",
-            "74": "Serviços de Cópias e Reprodução de Documentos",
-            "77": "Vigilância Ostensiva/Monitorada",
-            "78": "Limpeza e Conservação",
-            "99": "Outros Serviços de Terceiros PJ",
-        },
     },
     "52": {
         "nome": "Equipamentos e Material Permanente",
@@ -112,21 +73,38 @@ ND_ELEMENTS: Dict[str, Dict[str, Any]] = {
             "mobiliário",
             "permanente",
         ],
-        "subelementos": {
-            "02": "Aparelhos de Medição e Orientação",
-            "03": "Aparelhos e Equipamentos de Comunicação",
-            "06": "Aparelhos e Utensílios Domésticos",
-            "08": "Aparelhos e Equipamentos Médicos/Odontológicos",
-            "12": "Equipamentos de Proteção, Segurança e Socorro",
-            "14": "Máquinas e Equipamentos de Natureza Industrial",
-            "17": "Equipamentos para Áudio, Vídeo e Foto",
-            "18": "Máquinas, Utensílios e Equipamentos Diversos",
-            "19": "Equipamentos de Processamento de Dados",
-            "20": "Máquinas, Instalações e Utensílios de Escritório",
-            "21": "Máquinas, Ferramentas e Utensílios de Oficina",
-            "22": "Equipamentos e Utensílios Hidráulicos e Elétricos",
-            "99": "Outros Equipamentos e Material Permanente",
-        },
     },
 }
 
+
+def _title_case_ascii(value: str) -> str:
+    return " ".join(part.capitalize() for part in (value or "").strip().split())
+
+
+def _build_nd_elements() -> Dict[str, Dict[str, Any]]:
+    elements: Dict[str, Dict[str, Any]] = {}
+
+    for nd_code, info in ND_CLASSES.items():
+        if not isinstance(info, dict) or len(nd_code) < 2:
+            continue
+
+        element = nd_code[-2:]
+        sub_map = info.get("subelementos") or {}
+        semantics = _ELEMENT_SEMANTICS.get(element, {})
+        official_desc = str(info.get("descricao") or "").strip()
+
+        elements[element] = {
+            "codigo_classe": nd_code,
+            "nome": semantics.get("nome") or _title_case_ascii(official_desc),
+            "tipo": semantics.get("tipo"),
+            "descricao": semantics.get("descricao") or official_desc,
+            "palavras_chave": list(semantics.get("palavras_chave") or []),
+            "subelementos": {
+                str(k).zfill(2): str(v).strip() for k, v in sub_map.items() if str(k).strip()
+            },
+        }
+
+    return elements
+
+
+ND_ELEMENTS: Dict[str, Dict[str, Any]] = _build_nd_elements()

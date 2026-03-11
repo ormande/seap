@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import traceback
+import unicodedata
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -263,6 +264,8 @@ REGRAS:
 - Use ponto decimal (ex: 1500.50).
 - Unidade preserva letras (Un, Sv, Kg). Catmat SÓ números. ND sempre em formato EE.SS.
 - CNPJ tem SEMPRE 14 dígitos (não confunda com NUP).
+- O campo "item" é o NÚMERO REAL DA 1ª COLUNA da tabela. NÃO renumere em ordem cardinal.
+- Preserve exatamente números de item não sequenciais (ex.: 2, 29, 54, 79, 204).
 - Preencha todos os campos do JSON, extraia todos os itens da tabela.
 """.strip()
 
@@ -2221,6 +2224,441 @@ def normalize_nd(raw: str) -> str:
     return parsed["canonical"] or raw.strip()
 
 
+def _select_best_nd_sources(raw_item: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+    """
+    Dado um dict bruto de item de tabela, escolhe a melhor fonte de ND/SI
+    preservando o valor mais informativo possível.
+
+    A IA pode preencher múltiplos campos (ex.: "nd_si" mais genérico e "nd"
+    com o par completo elemento/subelemento). Esta função:
+    - coleta candidatos brutos relevantes (nd_si, nd);
+    - usa parse_nd_si para preferir pares completos válidos;
+    - evita degradar um par completo para prefixos genéricos como 33.90 ou 44.90.
+
+    Retorna:
+    - best_raw: string escolhida como principal (pode ser None/vazia se nada útil);
+    - extras: outros valores brutos distintos que ainda assim podem virar candidatos.
+    """
+    # Campos mais prováveis provenientes da tabela de itens.
+    candidate_keys = ["nd_si", "nd"]
+    seen: set[str] = set()
+    candidates: List[str] = []
+    for key in candidate_keys:
+        val = raw_item.get(key)
+        if val is None:
+            continue
+        s = str(val).strip()
+        if not s:
+            continue
+        if s in seen:
+            continue
+        seen.add(s)
+        candidates.append(s)
+
+    if not candidates:
+        return None, []
+
+    scored: List[Tuple[float, str]] = []
+    for cand in candidates:
+        parsed = parse_nd_si(cand)
+        score = 0.0
+
+        # Preferimos pares completos válidos.
+        if parsed.get("valid_pair"):
+            score += 100.0
+        # Depois, pares completos mesmo que a tabela não conheça o subelemento.
+        elif parsed.get("element") and parsed.get("subelement"):
+            score += 60.0
+        # Apenas elemento válido entra, mas com peso bem menor.
+        elif parsed.get("valid_element"):
+            score += 20.0
+
+        # Penalização forte para prefixos parciais como 33.90 / 44.90.
+        if parsed.get("parse_type") == "partial_prefix" or parsed.get("is_partial"):
+            score -= 40.0
+
+        # Pequeno desempate pelo comprimento da string (mais rico tende a ser maior).
+        score += len(cand) * 0.5
+
+        scored.append((score, cand))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_raw = scored[0][1]
+    extras = [c for _, c in scored[1:]]
+    return best_raw, extras
+
+
+def _normalize_item_number(value: Any) -> Optional[int]:
+    """
+    Normaliza o número real do item a partir da 1ª coluna da tabela.
+
+    Aceita formatos comuns retornados por IA/OCR, como:
+    - 29
+    - "29"
+    - "029"
+    - "Item 29"
+    - "29."
+    - "029 -"
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+
+    s = _normalize_whitespace(str(value))
+    if not s:
+        return None
+
+    if s.isdigit():
+        return int(s)
+
+    m = re.search(r"^(?:item\s*)?0*(\d{1,4})\b", s, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    return None
+
+
+def _normalize_table_cell(value: Any) -> str:
+    """Normaliza célula de tabela nativa do pdfplumber preservando conteúdo útil."""
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\n")
+    # Em tabelas nativas o SI costuma vir quebrado em duas linhas (ex.: 44.90.52\n/12).
+    text = text.replace("\n", " ")
+    text = _normalize_whitespace(text)
+    return text or ""
+
+
+def _fold_text(value: str) -> str:
+    """Remove acentos para comparações estruturais tolerantes a OCR/layout."""
+    normalized = unicodedata.normalize("NFKD", value or "")
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _table_row_has_item_header(row: List[str]) -> bool:
+    joined = _fold_text(" ".join(cell.lower() for cell in row if cell).strip())
+    if not joined:
+        return False
+    return (
+        "item" in joined
+        and "qtd" in joined
+        and ("catmat" in joined or "catserv" in joined or "cód" in joined or "cod" in joined)
+        and ("p total" in joined or "total" in joined)
+    )
+
+
+def _table_row_looks_like_item(row: List[str]) -> bool:
+    if not row:
+        return False
+    first = next((cell for cell in row if cell), "")
+    first_norm = _normalize_whitespace(first)
+    if not first_norm:
+        return False
+    if re.fullmatch(r"\d{1,3}", first_norm):
+        return True
+    return first_norm.upper().startswith("TOTAL")
+
+
+def _table_looks_like_item_continuation(table: List[List[str]]) -> bool:
+    if not table:
+        return False
+    if max((len(row) for row in table), default=0) < 8:
+        return False
+    return any(_table_row_looks_like_item(row) for row in table)
+
+
+def _serialize_item_table_rows(rows: List[List[str]]) -> str:
+    lines: List[str] = []
+    for row in rows:
+        normalized = [_normalize_table_cell(cell) for cell in row]
+        if any(normalized):
+            lines.append("\t".join(normalized))
+    return "\n".join(lines)
+
+
+def _extract_native_item_table_tsv(
+    pdf_path: str | Path,
+    req_pages: List[int],
+    image_pages: Optional[List[int]] = None,
+) -> Optional[str]:
+    """
+    Extrai a tabela de itens de PDFs nativos usando a estrutura tabular real.
+
+    Retorna um TSV consolidado das tabelas do tópico 6, preservando a 1ª coluna
+    (número real do item) e células como ND/SI que costumam vir quebradas.
+    """
+    if not pdfplumber:
+        return None
+
+    image_set = set(image_pages or [])
+    if not req_pages:
+        return None
+
+    serialized_blocks: List[str] = []
+    in_item_section = False
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_num in req_pages:
+                if page_num in image_set or page_num < 1 or page_num > len(pdf.pages):
+                    continue
+
+                page = pdf.pages[page_num - 1]
+                tables = page.extract_tables() or []
+                for table in tables:
+                    normalized_table = [
+                        [_normalize_table_cell(cell) for cell in (row or [])]
+                        for row in table
+                    ]
+                    if not normalized_table:
+                        continue
+
+                    header_idx = next(
+                        (
+                            idx
+                            for idx, row in enumerate(normalized_table)
+                            if _table_row_has_item_header(row)
+                        ),
+                        None,
+                    )
+
+                    if header_idx is not None:
+                        in_item_section = True
+                        table_rows: List[List[str]] = []
+                        if header_idx > 0:
+                            context_row = normalized_table[header_idx - 1]
+                            context_joined = " ".join(context_row).lower()
+                            if (
+                                "fornecedor" in context_joined
+                                or "nome da empresa" in context_joined
+                                or "cnpj" in context_joined
+                            ):
+                                table_rows.append(context_row)
+                        table_rows.extend(normalized_table[header_idx:])
+                        serialized = _serialize_item_table_rows(table_rows)
+                        if serialized:
+                            serialized_blocks.append(serialized)
+                        continue
+
+                    if in_item_section and _table_looks_like_item_continuation(normalized_table):
+                        serialized = _serialize_item_table_rows(normalized_table)
+                        if serialized:
+                            serialized_blocks.append(serialized)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Falha ao extrair tabela nativa do PDF no estágio 2: %s", exc)
+        return None
+
+    if not serialized_blocks:
+        return None
+    return "\n\n".join(serialized_blocks).strip() or None
+
+
+def _parse_native_item_table_hints(tsv: str) -> Dict[str, Any]:
+    """Extrai pistas determinísticas de uma TSV nativa para enriquecer o resultado da IA."""
+    if not tsv:
+        return {"fornecedor": None, "cnpj": None, "valor_total_geral": None, "items_by_number": {}}
+
+    fornecedor: Optional[str] = None
+    cnpj: Optional[str] = None
+    valor_total_geral: Optional[float] = None
+    items_by_number: Dict[int, Dict[str, Any]] = {}
+
+    for line in tsv.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        folded = _fold_text(stripped).lower()
+        if fornecedor is None and ("nome da empresa:" in folded or "fornecedor:" in folded):
+            m = re.search(
+                r"(?:nome da empresa:|fornecedor:)\s*(.+?)(?:\s+cnpj[:\s]|$)",
+                stripped,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                fornecedor = _normalize_whitespace(m.group(1))
+        if cnpj is None:
+            cnpj_match = re.search(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", stripped)
+            if cnpj_match:
+                cnpj = _normalize_cnpj(cnpj_match.group(0))
+
+        cols = [col.strip() for col in line.split("\t")]
+        if not cols:
+            continue
+
+        first = cols[0] if cols else ""
+        item_number = _normalize_item_number(first)
+        if item_number is not None and len(cols) >= 6:
+            hint: Dict[str, Any] = {"item": item_number}
+            if len(cols) > 1 and cols[1]:
+                hint["catmat"] = cols[1]
+            if len(cols) > 5 and cols[5]:
+                hint["nd"] = cols[5]
+            if len(cols) > 6 and cols[6]:
+                hint["valor_unitario"] = cols[6]
+            if len(cols) > 7 and cols[7]:
+                hint["valor_total"] = cols[7]
+            items_by_number[item_number] = hint
+            continue
+
+        if first.upper().startswith("TOTAL"):
+            for candidate in reversed(cols):
+                total_dec = _safe_decimal(candidate)
+                if total_dec is not None:
+                    valor_total_geral = float(total_dec)
+                    break
+
+    return {
+        "fornecedor": fornecedor,
+        "cnpj": cnpj,
+        "valor_total_geral": valor_total_geral,
+        "items_by_number": items_by_number,
+    }
+
+
+def _native_nd_is_richer(current_nd: Any, native_nd: Any) -> bool:
+    current = _normalize_whitespace(str(current_nd or ""))
+    native = _normalize_whitespace(str(native_nd or ""))
+    if not native:
+        return False
+    if not current:
+        return True
+
+    parsed_current = parse_nd_si(current)
+    parsed_native = parse_nd_si(native)
+
+    current_pair = bool(parsed_current.get("element") and parsed_current.get("subelement"))
+    native_pair = bool(parsed_native.get("element") and parsed_native.get("subelement"))
+    if native_pair and not current_pair:
+        return True
+    return len(native) > len(current)
+
+
+def _merge_native_table_hints(result: Dict[str, Any], native_tsv: Optional[str]) -> Dict[str, Any]:
+    """
+    Mescla pistas da tabela nativa estruturada ao JSON retornado pela IA.
+
+    Objetivo:
+    - preservar a 1ª coluna como número real do item;
+    - reinjetar ND/SI exata quando a IA a degradar para prefixo genérico;
+    - recuperar fornecedor/CNPJ/total quando a tabela nativa os mostra claramente.
+    """
+    if not isinstance(result, dict) or not native_tsv:
+        return result
+
+    hints = _parse_native_item_table_hints(native_tsv)
+    if hints.get("fornecedor") and not result.get("fornecedor"):
+        result["fornecedor"] = hints["fornecedor"]
+    if hints.get("cnpj") and not result.get("cnpj"):
+        result["cnpj"] = hints["cnpj"]
+    if hints.get("valor_total_geral") is not None and result.get("valor_total_geral") in (None, "", 0):
+        result["valor_total_geral"] = hints["valor_total_geral"]
+
+    items = result.get("itens")
+    if not isinstance(items, list):
+        return result
+
+    items_by_number = hints.get("items_by_number") or {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_number = _normalize_item_number(item.get("item"))
+        if item_number is None:
+            continue
+        hint = items_by_number.get(item_number)
+        if not hint:
+            continue
+
+        item["item"] = item_number
+        if hint.get("catmat") and not item.get("catmat"):
+            item["catmat"] = hint["catmat"]
+
+        native_nd = hint.get("nd")
+        if _native_nd_is_richer(item.get("nd_si"), native_nd):
+            # Guarda em `nd` para o resolvedor preferir o valor mais rico.
+            item["nd"] = native_nd
+            if not item.get("nd_si"):
+                item["nd_si"] = native_nd
+
+    return result
+
+
+def _sum_stage2_items_total(items: List[Stage2Item]) -> Optional[Decimal]:
+    total = Decimal("0.00")
+    found = False
+    for item in items or []:
+        vt = _safe_decimal(item.valor_total)
+        if vt is None:
+            continue
+        total += vt
+        found = True
+    return total if found else None
+
+
+def _decimal_matches(a: Optional[Decimal], b: Optional[Decimal], tolerance: Decimal = Decimal("0.02")) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(a - b) <= tolerance
+
+
+def _merge_image_table_results(
+    azure_data: Dict[str, Any],
+    vision_data: Dict[str, Any],
+) -> Tuple[List[Stage2Item], Optional[str], Optional[str], Optional[float]]:
+    """
+    Mescla resultados de tabela-imagem:
+    - Azure é fonte principal da malha tabular (itemização);
+    - Gemini Vision complementa campos globais/semânticos como fornecedor e total.
+    """
+    azure_items: List[Stage2Item] = azure_data.get("items") or []
+    vision_items: List[Stage2Item] = vision_data.get("items") or []
+
+    items = azure_items or vision_items
+
+    azure_fornecedor = azure_data.get("fornecedor")
+    vision_fornecedor = vision_data.get("fornecedor")
+    fornecedor = azure_fornecedor or vision_fornecedor
+
+    azure_cnpj = azure_data.get("cnpj")
+    vision_cnpj = vision_data.get("cnpj")
+    cnpj = azure_cnpj or vision_cnpj
+    if not cnpj and vision_cnpj:
+        cnpj = vision_cnpj
+
+    azure_total = _safe_decimal(azure_data.get("valor_total_geral"))
+    vision_total = _safe_decimal(vision_data.get("valor_total_geral"))
+    items_total = _sum_stage2_items_total(items)
+
+    chosen_total: Optional[Decimal] = None
+    if _decimal_matches(vision_total, items_total) and not _decimal_matches(azure_total, items_total):
+        chosen_total = vision_total
+    elif _decimal_matches(azure_total, items_total) and not _decimal_matches(vision_total, items_total):
+        chosen_total = azure_total
+    elif _decimal_matches(vision_total, items_total):
+        chosen_total = vision_total
+    elif _decimal_matches(azure_total, items_total):
+        chosen_total = azure_total
+    elif vision_total is not None and azure_total is None:
+        chosen_total = vision_total
+    elif azure_total is not None and vision_total is None:
+        chosen_total = azure_total
+    else:
+        chosen_total = vision_total or azure_total or items_total
+
+    # Vision costuma ser melhor para fornecedor/CNPJ em tabela-imagem.
+    if vision_fornecedor:
+        fornecedor = vision_fornecedor
+    if vision_cnpj:
+        cnpj = vision_cnpj
+
+    return items, fornecedor, cnpj, float(chosen_total) if chosen_total is not None else None
+
+
 def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
     """
     Faz o parse/normalização de ND/SI em um formato canônico.
@@ -2648,7 +3086,7 @@ def _parse_table_result(
     for raw in itens_raw:
         if not isinstance(raw, dict):
             continue
-        nd_raw_global = str(raw.get("nd_si") or raw.get("nd") or "").strip()
+        nd_raw_global, _ = _select_best_nd_sources(raw)
         if not nd_raw_global:
             continue
         parsed_global = parse_nd_si(nd_raw_global)
@@ -2667,11 +3105,7 @@ def _parse_table_result(
         if not isinstance(raw, dict):
             continue
         try:
-            item_num = raw.get("item")
-            try:
-                item_int = int(item_num) if item_num is not None else None
-            except (TypeError, ValueError):
-                item_int = None
+            item_int = _normalize_item_number(raw.get("item"))
             q = _safe_decimal(raw.get("quantidade"))
             vu = _safe_decimal(raw.get("valor_unitario"))
             vt = _safe_decimal(raw.get("valor_total"))
@@ -2681,15 +3115,17 @@ def _parse_table_result(
                 if desc_full
                 else None
             )
-            nd_raw = str(raw.get("nd_si") or raw.get("nd") or "").strip()
+            nd_raw, nd_extras = _select_best_nd_sources(raw)
+            nd_raw = (nd_raw or "").strip()
             desc_for_nd = desc_full or desc_short or ""
             nd_resolution = (
                 resolve_nd_candidate(
                     nd_raw,
                     desc_for_nd,
                     nd_processo=nd_processo,
+                    candidatos_extras=nd_extras or None,
                 )
-                if nd_raw
+                if nd_raw or nd_extras
                 else {
                     "chosen": None,
                     "candidates": [],
@@ -2754,6 +3190,7 @@ def extract_items_table(
     req_pages = req_pages or []
     image_pages = image_pages or []
     images_b64: List[str] = []
+    native_table_tsv: Optional[str] = None
     if pdf_path and req_pages:
         for page_num in req_pages:
             if page_num in image_pages:
@@ -2764,6 +3201,10 @@ def extract_items_table(
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Falha ao converter página %s para base64: %s", page_num, exc)
 
+        # Para PDFs nativos, tenta primeiro preservar a estrutura da tabela real
+        # antes de cair no texto corrido da requisição.
+        native_table_tsv = _extract_native_item_table_tsv(pdf_path, req_pages, image_pages)
+
     if not combined and not (pdf_path and req_pages):
         return [], False, None, None, None
 
@@ -2773,23 +3214,56 @@ def extract_items_table(
         logger.warning("Gemini indisponível para extração de tabela no estágio 2: %s", exc)
         return [], False, None, None, None
 
-    # 1. Extração base por texto (sem imagens; fallbacks vêm depois)
-    prompt_base = STAGE2_TABLE_PROMPT + "\n\nTEXTO DA TABELA:\n" + (
-        combined or "(sem texto extraído; será usado fallback Azure ou Vision se disponível)"
-    )
-    try:
-        result, _, _ = proc._generate(prompt_base, "stage2_table")  # type: ignore[attr-defined]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Falha ao extrair tabela de itens com IA no estágio 2: %s", exc)
-        return [], False, None, None, None
+    items: List[Stage2Item] = []
+    fornecedor: Optional[str] = None
+    cnpj: Optional[str] = None
+    valor_total_geral: Optional[Decimal] = None
 
-    if not isinstance(result, dict):
-        return [], False, None, None, None
+    # 1. Extração base por tabela nativa estruturada, quando disponível.
+    if native_table_tsv:
+        prompt_native = (
+            STAGE2_TABLE_PROMPT
+            + "\n\nTEXTO DA TABELA (TSV nativo do PDF):\n"
+            + native_table_tsv
+        )
+        try:
+            result_native, _, _ = proc._generate(
+                prompt_native, "stage2_table_native"
+            )  # type: ignore[attr-defined]
+            if isinstance(result_native, dict):
+                result_native = _merge_native_table_hints(result_native, native_table_tsv)
+                items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result_native)
+                if items:
+                    print(
+                        f"[Stage2][{nup_id}] Tabela nativa: {len(items)} item(ns) extraído(s)",
+                        flush=True,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Falha ao extrair tabela nativa estruturada no estágio 2: %s", exc
+            )
 
-    items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
+    # 2. Extração base por texto corrido (fallback para PDFs nativos sem tabela
+    # estruturada e primeira tentativa para contextos sem itemização legível).
+    if not items:
+        prompt_base = STAGE2_TABLE_PROMPT + "\n\nTEXTO DA TABELA:\n" + (
+            combined or "(sem texto extraído; será usado fallback Azure ou Vision se disponível)"
+        )
+        try:
+            result, _, _ = proc._generate(prompt_base, "stage2_table")  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Falha ao extrair tabela de itens com IA no estágio 2: %s", exc)
+            return [], False, None, None, None
+
+        if not isinstance(result, dict):
+            return [], False, None, None, None
+
+        if native_table_tsv:
+            result = _merge_native_table_hints(result, native_table_tsv)
+        items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
 
     if not items or len(items) == 0:
-        print(f"[Stage2][{nup_id}] 0 itens na 1ª tentativa (Gemini texto)", flush=True)
+        print(f"[Stage2][{nup_id}] 0 itens na tentativa base (nativo/texto)", flush=True)
         # TENTATIVA 2: AZURE (apenas se houver páginas com imagem grande + âncora)
         if pdf_path and req_pages and extract_table_text_with_azure and get_pages_with_large_images:
             pages_with_imgs = get_pages_with_large_images(pdf_path, req_pages)
@@ -2809,6 +3283,18 @@ def extract_items_table(
                                 azure_tsvs.append(tsv)
 
                     azure_tsv_combined = "\n".join(azure_tsvs)
+                    azure_parsed: Dict[str, Any] = {
+                        "items": [],
+                        "fornecedor": None,
+                        "cnpj": None,
+                        "valor_total_geral": None,
+                    }
+                    vision_parsed: Dict[str, Any] = {
+                        "items": [],
+                        "fornecedor": None,
+                        "cnpj": None,
+                        "valor_total_geral": None,
+                    }
                     if azure_tsv_combined.strip():
                         prompt_azure = (
                             STAGE2_TABLE_PROMPT
@@ -2819,27 +3305,75 @@ def extract_items_table(
                             prompt_azure, "stage2_table_azure"
                         )
                         if isinstance(result_azure, dict):
-                            items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
+                            az_items, az_fornecedor, az_cnpj, az_total = _parse_table_result(
                                 result_azure
                             )
-                            if items:
-                                print(f"[Stage2][{nup_id}] Azure fallback: {len(items)} itens extraídos", flush=True)
-                                return (
-                                    items,
-                                    True,
-                                    float(valor_total_geral) if valor_total_geral is not None else None,
-                                    fornecedor,
-                                    cnpj,
+                            azure_parsed = {
+                                "items": az_items,
+                                "fornecedor": az_fornecedor,
+                                "cnpj": az_cnpj,
+                                "valor_total_geral": az_total,
+                            }
+                            if az_items:
+                                print(
+                                    f"[Stage2][{nup_id}] Azure fallback: {len(az_items)} itens extraídos",
+                                    flush=True,
                                 )
-                    if not items or len(items) == 0:
+                    if not azure_parsed["items"]:
                         print(
                             f"[Stage2][{nup_id}] Azure: 0 itens → acionando Vision fallback",
                             flush=True,
                         )
+
+                    # TENTATIVA 3: GEMINI VISION
+                    fallback_images: List[str] = []
+                    for p in req_pages:
+                        img = page_to_base64(pdf_path, p)
+                        if img:
+                            fallback_images.append(img)
+                    if fallback_images:
+                        try:
+                            prompt_vision = (
+                                STAGE2_TABLE_PROMPT
+                                + "\n\nTEXTO DA TABELA:\n(sem texto extraído; use as imagens anexas)"
+                            )
+                            result_fb, _, _ = proc._generate_with_images(  # type: ignore[attr-defined]
+                                prompt_vision, fallback_images, "stage2_table_vision_fallback"
+                            )
+                            if isinstance(result_fb, dict):
+                                vi_items, vi_fornecedor, vi_cnpj, vi_total = _parse_table_result(
+                                    result_fb
+                                )
+                                vision_parsed = {
+                                    "items": vi_items,
+                                    "fornecedor": vi_fornecedor,
+                                    "cnpj": vi_cnpj,
+                                    "valor_total_geral": vi_total,
+                                }
+                                if vi_items:
+                                    print(
+                                        f"[Stage2][{nup_id}] Vision fallback: {len(vi_items)} item(ns) extraído(s)",
+                                        flush=True,
+                                    )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("Vision fallback falhou no estágio 2: %s", exc)
+
+                    merged_items, merged_fornecedor, merged_cnpj, merged_total = _merge_image_table_results(
+                        azure_parsed,
+                        vision_parsed,
+                    )
+                    if merged_items:
+                        return (
+                            merged_items,
+                            True,
+                            merged_total,
+                            merged_fornecedor,
+                            merged_cnpj,
+                        )
                 except Exception as e:
                     print(f"[Stage2][{nup_id}] Erro Azure: {e}", flush=True)
 
-        # TENTATIVA 3: GEMINI VISION (só roda se o Azure falhou ou não retornou itens)
+        # TENTATIVA 3 LEGADA: GEMINI VISION isolado quando Azure não está disponível.
         if not items or len(items) == 0:
             if pdf_path and req_pages and page_to_base64:
                 fallback_images: List[str] = []
@@ -2988,6 +3522,16 @@ def _compute_confidence(
         if data.uasg.nome:
             uasg_conf = 95
 
+    # Recalibração por confirmação cruzada do próprio Stage 2:
+    # se a UASG final saiu consistente (código + nome) e o instrumento também
+    # foi resolvido, não queremos que a confiança fique artificialmente baixa
+    # só porque o score textual bruto foi conservador.
+    if data.uasg and data.uasg.codigo:
+        if data.uasg.nome:
+            uasg_conf = max(uasg_conf, 85)
+        if data.instrumento and data.instrumento.numero:
+            uasg_conf = max(uasg_conf, 90)
+
     tipo_empenho_conf = 0
     if tipo_empenho_conf_override is not None:
         tipo_empenho_conf = max(0, min(100, tipo_empenho_conf_override))
@@ -2999,6 +3543,8 @@ def _compute_confidence(
         fornecedor_conf = 80
         if data.cnpj:
             fornecedor_conf = 90
+        if data.cnpj and data.itens:
+            fornecedor_conf = 95
 
     cnpj_conf = 0
     if cnpj_conf_override is not None:
@@ -3007,6 +3553,12 @@ def _compute_confidence(
         cnpj_conf = 95
     elif data.cnpj:
         cnpj_conf = 60
+
+    if data.cnpj and isinstance(data.cnpj, str) and CNPJ_STRICT_REGEX.fullmatch(data.cnpj):
+        if data.fornecedor:
+            cnpj_conf = max(cnpj_conf, 90)
+        if data.fornecedor and data.itens:
+            cnpj_conf = max(cnpj_conf, 95)
 
     valor_total_conf = 0
     if data.valor_total is not None:

@@ -20,6 +20,17 @@ except ImportError:
     from ai_processor import GeminiProcessor
 
 try:
+    from .analyze_payloads import (
+        build_analyze_full_payload,
+        build_analyze_summary_payload,
+    )
+except ImportError:
+    from analyze_payloads import (
+        build_analyze_full_payload,
+        build_analyze_summary_payload,
+    )
+
+try:
     from .database import (
         add_uasg as db_add_uasg,
         delete_analysis,
@@ -624,8 +635,11 @@ async def analyze_pdf(
                 stages=stages,
             )
 
-            payload = analyze_response.model_dump(mode="json")
-            yield f"data: {json.dumps({'phase': 'complete', 'progress': 100, 'message': 'Análise concluída.', 'result': payload})}\n\n"
+            # Payload completo para auditoria e payload enxuto para UI/download padrão.
+            full_payload = build_analyze_full_payload(analyze_response)
+            summary_payload = build_analyze_summary_payload(analyze_response)
+
+            yield f"data: {json.dumps({'phase': 'complete', 'progress': 100, 'message': 'Análise concluída.', 'result': summary_payload, 'full': full_payload})}\n\n"
 
         except HTTPException as exc:
             # Erros conhecidos: envia evento de erro antes de encerrar.

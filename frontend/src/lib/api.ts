@@ -1,7 +1,7 @@
 'use client';
 
 import { getSession } from 'next-auth/react';
-import type { AnalyzeResult } from '../types/extraction';
+import type { AnalyzeFullResult, AnalyzeResult } from '../types/extraction';
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -76,11 +76,11 @@ export type AnalysisSummary = {
 
 /** Análise completa com dados_completos (estágios 1–6). */
 export type AnalysisFull = AnalysisSummary & {
-  dados_completos: AnalyzeResult;
+  dados_completos: AnalyzeFullResult;
 };
 
 export async function saveAnalysis(
-  dados_completos: AnalyzeResult,
+  dados_completos: AnalyzeFullResult,
   tempo_analise: number,
 ): Promise<{ id: string; success: boolean }> {
   const res = await fetchAPI('/api/analyses', {

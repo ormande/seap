@@ -21,7 +21,7 @@ import { Stage6Content } from '../components/Stage6Content';
 import { PdfUpload } from '../components/upload/PdfUpload';
 import { Toast } from '../components/Toast';
 import { fetchAPI, saveAnalysis } from '../lib/api';
-import type { AnalyzeResult } from '../types/extraction';
+import type { AnalyzeFullResult, AnalyzeResult } from '../types/extraction';
 
 function formatTimer(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -95,6 +95,7 @@ export default function HomePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [fullResult, setFullResult] = useState<AnalyzeFullResult | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [progress, setProgress] = useState(0);
   const [phaseMessage, setPhaseMessage] = useState<string>('Iniciando análise...');
@@ -129,6 +130,7 @@ export default function HomePage() {
   const resetState = () => {
     setIsProcessing(false);
     setResult(null);
+    setFullResult(null);
     setError(null);
     setElapsedSeconds(0);
     setProgress(0);
@@ -139,6 +141,7 @@ export default function HomePage() {
   const handleFileSelected = async (file: File) => {
     setError(null);
     setResult(null);
+    setFullResult(null);
     setProgress(0);
     setPhaseMessage('Enviando arquivo para análise...');
     setIsProcessing(true);
@@ -198,7 +201,9 @@ export default function HomePage() {
               setPhaseMessage(data.message);
             }
             if (data.phase === 'complete' && data.result) {
+              // result: summary enxuto para uso na UI e download padrão.
               setResult(data.result as AnalyzeResult);
+              setFullResult((data.full as AnalyzeFullResult | undefined) ?? null);
               setIsProcessing(false);
             }
             if (data.phase === 'error') {
@@ -236,7 +241,10 @@ export default function HomePage() {
     if (!result) return;
     setShowSaveModal(false);
     try {
-      await saveAnalysis(result, elapsedSeconds);
+      await saveAnalysis(
+        fullResult ?? ({ ...result, extraction: {} } as AnalyzeFullResult),
+        elapsedSeconds,
+      );
       setToast('Análise salva com sucesso');
       // Toast controla a animação de saída e o fechamento; após fechar limpamos o estado.
     } catch (e) {
@@ -465,6 +473,22 @@ export default function HomePage() {
               confidence={stage2.confidence}
               onUasgNomeAdded={(codigo, nome) => {
                 setResult((prev) => {
+                  if (!prev?.stages?.stage2?.data) return prev;
+                  return {
+                    ...prev,
+                    stages: {
+                      ...prev.stages,
+                      stage2: {
+                        ...prev.stages.stage2,
+                        data: {
+                          ...prev.stages.stage2.data,
+                          uasg: { codigo, nome },
+                        },
+                      },
+                    },
+                  };
+                });
+                setFullResult((prev) => {
                   if (!prev?.stages?.stage2?.data) return prev;
                   return {
                     ...prev,

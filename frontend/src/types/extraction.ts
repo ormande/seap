@@ -434,9 +434,14 @@ export type AnalyzeStages = {
   [key: string]: unknown;
 };
 
-export type AnalyzeResult = {
-  extraction: Record<string, string>;
+export type AnalyzeSummaryResult = {
   metadata: AnalyzeMetadata;
   stages: AnalyzeStages;
 };
+
+export type AnalyzeFullResult = AnalyzeSummaryResult & {
+  extraction: Record<string, string>;
+};
+
+export type AnalyzeResult = AnalyzeSummaryResult;
 

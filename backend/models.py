@@ -1020,3 +1020,20 @@ class AnalyzeResponse(BaseModel):
         ..., description="Resultados por estágio do pipeline."
     )
 
+
+class AnalyzeSummary(BaseModel):
+    """
+    Versão enxuta do resultado de análise, voltada para download padrão e
+    comparação entre execuções.
+
+    Remove texto bruto e trilhas diagnósticas profundas, mantendo apenas
+    os campos consolidados mais úteis para o usuário final.
+    """
+
+    metadata: AnalyzeMetadata = Field(
+        ..., description="Metadados agregados da extração."
+    )
+    stages: AnalyzeStages = Field(
+        ..., description="Resultados por estágio do pipeline (formato resumido esperado pelo frontend)."
+    )
+
