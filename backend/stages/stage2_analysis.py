@@ -65,6 +65,7 @@ try:
         Stage2Divergencia,
         Stage2Instrument,
         Stage2Item,
+        Stage2Mask,
         Stage2NDVerification,
         Stage2NDVerificationItem,
         Stage2Result,
@@ -81,6 +82,7 @@ except ImportError:
         Stage2Divergencia,
         Stage2Instrument,
         Stage2Item,
+        Stage2Mask,
         Stage2NDVerification,
         Stage2NDVerificationItem,
         Stage2Result,
@@ -3818,6 +3820,724 @@ def verify_nd_with_ai(items: List[Stage2Item]) -> Optional[Stage2NDVerification]
     )
 
 
+MASK_MONTHS = {
+    1: "JAN",
+    2: "FEV",
+    3: "MAR",
+    4: "ABR",
+    5: "MAIO",
+    6: "JUN",
+    7: "JUL",
+    8: "AGO",
+    9: "SET",
+    10: "OUT",
+    11: "NOV",
+    12: "DEZ",
+}
+
+MONTH_NAME_TO_NUM = {
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "março": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
+
+MASK_ND_BY_ELEMENT = {
+    "30": "339030",
+    "39": "339039",
+    "52": "449052",
+}
+
+MASK_OM_ABBREVIATIONS = {
+    "9º BATALHÃO DE SUPRIMENTO": "9º B SUP",
+    "9º BATALHÃO DE MANUTENÇÃO": "9º B MNT",
+    "9º BATALHÃO DE SAÚDE": "9º B SAU",
+    "9º GRUPAMENTO LOGÍSTICO": "9º GPT LOG",
+    "18º BATALHÃO DE TRANSPORTE": "18º B TRNP",
+}
+
+
+def _format_mask_date(day: int, month: int, year: int) -> Optional[str]:
+    if not (1 <= day <= 31 and 1 <= month <= 12):
+        return None
+    year_short = year % 100
+    month_token = MASK_MONTHS.get(month)
+    if not month_token:
+        return None
+    return f"{day:02d} {month_token} {year_short:02d}"
+
+
+def _format_budget_nd_display(nd: Optional[str]) -> Optional[str]:
+    if not nd:
+        return None
+    digits = re.sub(r"\D", "", str(nd))
+    if len(digits) == 6:
+        return f"{digits[:2]}.{digits[2:4]}.{digits[4:]}"
+    parsed = parse_nd_si(str(nd))
+    element = parsed.get("element")
+    if element:
+        mapped = MASK_ND_BY_ELEMENT.get(str(element))
+        if mapped:
+            return f"{mapped[:2]}.{mapped[2:4]}.{mapped[4:]}"
+    return None
+
+
+def _normalize_mask_date(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    text = _normalize_whitespace(str(raw))
+    if not text:
+        return None
+
+    m = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b", text)
+    if m:
+        day, month, year = map(int, m.groups())
+        if year < 100:
+            year += 2000
+        return _format_mask_date(day, month, year)
+
+    m = re.search(
+        r"\b(\d{1,2})\s+de\s+([A-Za-zÀ-ÿçÇ]+)\s+de\s+(\d{4})\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        day = int(m.group(1))
+        month_name = m.group(2).lower()
+        year = int(m.group(3))
+        month = MONTH_NAME_TO_NUM.get(month_name)
+        if month:
+            return _format_mask_date(day, month, year)
+
+    m = re.search(r"\b(\d{1,2})\s+([A-Za-zÀ-ÿçÇ]{3,5})\s+(\d{2,4})\b", text, flags=re.IGNORECASE)
+    if m:
+        day = int(m.group(1))
+        month_name = m.group(2).lower()
+        month = MONTH_NAME_TO_NUM.get(month_name)
+        year = int(m.group(3))
+        if year < 100:
+            year += 2000
+        if month:
+            return _format_mask_date(day, month, year)
+
+    return None
+
+
+def _extract_mask_budget_fields(text: str) -> Dict[str, Optional[str]]:
+    normalized = _normalize_for_regex(text)
+    fields: Dict[str, Optional[str]] = {
+        "nc": None,
+        "data": None,
+        "orgao_emissor": None,
+        "ptres": None,
+        "ugr": None,
+        "pi": None,
+        "fonte": None,
+        "nd_orcamentaria": None,
+    }
+
+    nc_match = re.search(
+        r"\b(20\d{2}NC\d{6})\b(?:,\s*de\s*([^.]+?))?(?:,\s*d[oa]s?\s+([^,\.]+))?",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if nc_match:
+        fields["nc"] = nc_match.group(1).upper()
+        fields["data"] = _normalize_mask_date(nc_match.group(2))
+        orgao = nc_match.group(3)
+        fields["orgao_emissor"] = _normalize_whitespace(orgao).upper() if orgao else None
+
+    ptres = re.search(r"\bPTRES\s+(\d{6})\b", normalized, flags=re.IGNORECASE)
+    if ptres:
+        fields["ptres"] = ptres.group(1)
+
+    ugr = re.search(r"\bUGR\s+(\d{6})\b", normalized, flags=re.IGNORECASE)
+    if ugr:
+        fields["ugr"] = ugr.group(1)
+
+    pi = re.search(r"\bPI\s+([A-Z0-9]+)\b", normalized, flags=re.IGNORECASE)
+    if pi:
+        fields["pi"] = pi.group(1).upper()
+
+    fonte = re.search(r"\bFONTE\s+(\d{6,10})\b", normalized, flags=re.IGNORECASE)
+    if fonte:
+        fields["fonte"] = fonte.group(1)
+
+    nd_match = re.search(r"\b(?:ND|NATUREZA DE DESPESA)\s*(?:[:\-]?\s*)?((?:33|44)90(?:30|39|52))\b", normalized, flags=re.IGNORECASE)
+    if nd_match:
+        fields["nd_orcamentaria"] = nd_match.group(1)
+
+    return fields
+
+
+def _resolve_mask_nd(mask_budget: Dict[str, Optional[str]], nd_req: Optional[str]) -> Tuple[Optional[str], List[str]]:
+    warnings: List[str] = []
+    nd_budget = (mask_budget.get("nd_orcamentaria") or "").strip() or None
+    nd_from_items = None
+    element = None
+    if nd_req:
+        parsed = parse_nd_si(nd_req)
+        element = parsed.get("element")
+        nd_from_items = MASK_ND_BY_ELEMENT.get(str(element)) if element else None
+
+    if nd_from_items and nd_budget:
+        budget_element = nd_budget[-2:]
+        if budget_element == element:
+            return nd_budget, warnings
+        warnings.append("ND textual divergente do elemento confirmado pelos itens; aplicada ND coerente com a tabela.")
+        return nd_from_items, warnings
+
+    if nd_from_items:
+        return nd_from_items, warnings
+    if nd_budget:
+        return nd_budget, warnings
+    warnings.append("ND não pôde ser confirmada com segurança.")
+    return None, warnings
+
+
+def _infer_mask_uasg_role(text: str) -> Optional[str]:
+    lowered = _normalize_for_regex(text).lower()
+    if any(token in lowered for token in ["carona", "(car)", " car)"]):
+        return "CAR"
+    if any(
+        token in lowered
+        for token in [
+            "do qual esta uasg e participante",
+            "do qual esta uasg é participante",
+            "esta uasg e participante",
+            "esta uasg é participante",
+            "uasg e participante",
+            "uasg é participante",
+            "participante",
+            "(part)",
+            " part)",
+        ]
+    ):
+        return "PART"
+    if any(token in lowered for token in ["participante", "(part)", " part)"]):
+        return "PART"
+    if any(
+        token in lowered
+        for token in [
+            "do qual esta uasg e gerenciadora",
+            "do qual esta uasg é gerenciadora",
+            "esta uasg e gerenciadora",
+            "esta uasg é gerenciadora",
+            "gerenciado pela uasg",
+            "gerenciado pela",
+            "gerenciadora",
+            "gerenciador",
+            "(ger)",
+            " ger)",
+        ]
+    ):
+        return "GER"
+    return None
+
+
+def _instrument_mask_label(tipo: Optional[str]) -> Optional[str]:
+    if not tipo:
+        return None
+    lowered = tipo.lower()
+    if "preg" in lowered:
+        return "PE"
+    if "contrato" in lowered:
+        return "CONT"
+    if "dispensa" in lowered:
+        return "DISP"
+    if "chamada" in lowered:
+        return "CHAMADA PÚBLICA"
+    return None
+
+
+def _mask_om_label(text: str, uasg_nome: Optional[str]) -> Optional[str]:
+    normalized = _normalize_for_regex(text).upper()
+    if uasg_nome:
+        mapped = MASK_OM_ABBREVIATIONS.get(_normalize_whitespace(uasg_nome).upper())
+        if mapped:
+            return mapped
+    for full_name, sigla in MASK_OM_ABBREVIATIONS.items():
+        if full_name in normalized or sigla in normalized:
+            return sigla
+    return None
+
+
+def _apply_preferred_om_to_mask(mask_text: Optional[str], preferred_om: Optional[str]) -> Optional[str]:
+    if not mask_text or not preferred_om:
+        return mask_text
+
+    updated = mask_text
+    for full_name, sigla in MASK_OM_ABBREVIATIONS.items():
+        updated = re.sub(
+            rf"\b{re.escape(full_name)}\b",
+            sigla,
+            updated,
+            flags=re.IGNORECASE,
+        )
+    return updated
+
+
+def _apply_mask_header_dash(mask_text: Optional[str]) -> Optional[str]:
+    if not mask_text:
+        return mask_text
+
+    return re.sub(
+        r"^([^,]+),\s*((?:REQ|DISP)\b[^,]*)",
+        r"\1 - \2",
+        mask_text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
+def _normalize_mask_text(text: str) -> str:
+    cleaned = _normalize_whitespace(text.upper())
+    cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
+    cleaned = re.sub(r",\s*,+", ", ", cleaned)
+    cleaned = re.sub(r"\s+\.", ".", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = cleaned.strip(" ,;")
+    if cleaned and not cleaned.endswith("."):
+        cleaned += "."
+    return cleaned
+
+
+def _apply_preferred_nd_to_mask(mask_text: Optional[str], preferred_nd: Optional[str], nd_req: Optional[str]) -> Optional[str]:
+    if not mask_text or not preferred_nd:
+        return mask_text
+
+    updated = mask_text
+    preferred_display = _format_budget_nd_display(preferred_nd) or preferred_nd
+    candidates = []
+    if nd_req:
+        candidates.append(nd_req)
+        parsed = parse_nd_si(nd_req)
+        display = parsed.get("display")
+        canonical = parsed.get("canonical")
+        if display:
+            candidates.append(display)
+        if canonical:
+            candidates.append(canonical)
+
+    # Reescreve variantes de ND/SI agregada para a ND orçamentária esperada.
+    for candidate in {c for c in candidates if c}:
+        updated = re.sub(
+            rf"\bND\s+{re.escape(str(candidate).upper())}\b",
+            f"ND {preferred_display}",
+            updated,
+            flags=re.IGNORECASE,
+        )
+
+    # Se a máscara trouxe "ND 30" / "ND 39" / "ND 52", também converte.
+    preferred_element = preferred_nd[-2:] if len(preferred_nd) >= 2 else None
+    if preferred_element:
+        updated = re.sub(
+            rf"\bND\s+{re.escape(preferred_element)}\b",
+            f"ND {preferred_display}",
+            updated,
+            flags=re.IGNORECASE,
+        )
+
+    return updated
+
+
+def _normalize_mask_nd_token(token: str) -> Optional[str]:
+    cleaned = _normalize_whitespace(str(token or ""))
+    if not cleaned:
+        return None
+
+    digits = re.sub(r"\D", "", cleaned)
+    if len(digits) == 6 and digits in set(MASK_ND_BY_ELEMENT.values()):
+        return digits
+
+    parsed = parse_nd_si(cleaned)
+    element = parsed.get("element")
+    if element:
+        return MASK_ND_BY_ELEMENT.get(str(element))
+
+    return None
+
+
+def _mask_contains_preferred_nd(mask_text: Optional[str], preferred_nd: Optional[str]) -> bool:
+    if not mask_text or not preferred_nd:
+        return False
+
+    for match in re.finditer(r"\bND\s+([0-9./]+)\b", mask_text, flags=re.IGNORECASE):
+        normalized = _normalize_mask_nd_token(match.group(1))
+        if normalized == preferred_nd:
+            return True
+    return False
+
+
+def _build_mask_generation_context(requisition_text: str, data: Stage2Data) -> Dict[str, Any]:
+    budget = _extract_mask_budget_fields(requisition_text)
+    nd_mask, nd_warnings = _resolve_mask_nd(budget, data.nd_req)
+    instrument_label = _instrument_mask_label(data.instrumento.tipo if data.instrumento else None)
+    uasg_role = _infer_mask_uasg_role(requisition_text)
+    om_sigla = _mask_om_label(requisition_text, data.uasg.nome if data.uasg else None)
+
+    return {
+        "om_sigla": om_sigla,
+        "instrumento_tipo": data.instrumento.tipo if data.instrumento else None,
+        "instrumento_numero": data.instrumento.numero if data.instrumento else None,
+        "instrumento_sigla": instrument_label,
+        "uasg_codigo": data.uasg.codigo if data.uasg else None,
+        "uasg_papel": uasg_role,
+        "tipo_empenho": data.tipo_empenho,
+        "nd_req": data.nd_req,
+        "nd_mascara_preferencial": nd_mask,
+        "nd_mascara_preferencial_display": _format_budget_nd_display(nd_mask),
+        "warnings_nd": nd_warnings,
+        "budget": budget,
+        "itens": [
+            {
+                "item": item.item,
+                "descricao": item.descricao_completa or item.descricao_resumida,
+                "nd_si": item.nd_si_display or item.nd_si_raw or item.nd_si,
+            }
+            for item in data.itens
+        ],
+        "texto_requisicao": requisition_text,
+    }
+
+
+STAGE2_MASK_PROMPT = """
+Você é um analista do SEAP gerando a máscara padronizada de uma requisição.
+
+Objetivo:
+- montar UMA máscara final em formato oficial;
+- usar o texto completo da requisição e os campos estruturados fornecidos;
+- respeitar a ordem oficial;
+- usar a ND coerente com a tabela de itens;
+- nunca incluir fiscal de contrato;
+- retornar null se faltar algum campo obrigatório sem base segura.
+
+Ordem oficial:
+[OM], [REQ/DISP/IDENTIFICAÇÃO], [SETOR se houver], [OBJETO], [NC se houver], de [DATA se houver], [ÓRGÃO EMISSOR se houver], ND [ND], PTRES [PTRES se houver], UGR [UGR se houver], PI [PI se houver], FONTE [FONTE se houver], [PE/CONT/DISP/CHAMADA PÚBLICA] [NÚMERO/ANO], UASG [XXXXX] ([GER/PART/CAR]).
+
+Regras:
+- campos separados por vírgula;
+- siglas em caixa alta;
+- data no formato DD MMM AA, com MAIO por extenso;
+- bloco final obrigatório: [INSTRUMENTO] [NÚMERO/ANO], UASG [XXXXX] ([GER/PART/CAR]).
+- não duplicar instrumento nem ND;
+- se houver conflito entre ND textual e ND coerente com a tabela, use a ND coerente com a tabela;
+- se faltar instrumento final, UASG, papel da UASG ou ND confiável, retorne mascara = null e descreva a pendência.
+
+Retorne APENAS JSON válido:
+{
+  "mascara": "texto final ou null",
+  "confidence": 90,
+  "pendencias": ["texto curto"],
+  "campos_utilizados": ["OM", "REQ", "NC", "ND", "PI", "PE", "UASG"]
+}
+""".strip()
+
+
+STAGE2_POST_ANALYSIS_PROMPT = """
+Você é um analista do SEAP fazendo duas tarefas ao mesmo tempo com base na requisição e na tabela de itens:
+1. verificar semanticamente se a ND/SI de cada item é compatível com a descrição;
+2. gerar a máscara personalizada final da requisição.
+
+Regras da verificação ND:
+- seja conservador;
+- marque "compatível" quando a ND/SI for plausível para o item;
+- marque "ressalva" só quando houver indício forte de incompatibilidade;
+- não invente erro quando a compatibilidade for plausível.
+
+Regras da máscara:
+- usar a ordem oficial informada;
+- usar a sigla/abreviação oficial da OM quando ela for fornecida nos dados estruturados;
+- usar a ND coerente com a tabela de itens;
+- representar a ND da máscara no formato orçamentário com pontos (ex.: 33.90.30), sem SI;
+- nunca incluir fiscal de contrato;
+- data no formato DD MMM AA, com MAIO por extenso;
+- bloco final obrigatório: [INSTRUMENTO] [NÚMERO/ANO], UASG [XXXXX] ([GER/PART/CAR]).
+- se faltar campo obrigatório sem base segura, retorne mascara = null e explique em pendencias.
+
+Retorne APENAS JSON válido neste formato:
+{
+  "verificacao_nd": {
+    "resumo": "texto curto",
+    "todos_compativeis": true,
+    "ressalvas": ["texto curto"],
+    "confidence": 90,
+    "itens": [
+      {
+        "item": 35,
+        "nd_informada": "30/07",
+        "status": "compatível",
+        "justificativa": "texto curto",
+        "subelemento_sugerido": null,
+        "nome_subelemento_sugerido": null,
+        "confianca": 95
+      }
+    ]
+  },
+  "mascara": {
+    "mascara": "texto final ou null",
+    "confidence": 90,
+    "pendencias": ["texto curto"],
+    "campos_utilizados": ["OM", "REQ", "NC", "ND", "PI", "PE", "UASG"]
+  }
+}
+""".strip()
+
+
+def generate_mask_with_ai(requisition_text: str, data: Stage2Data) -> Optional[Stage2Mask]:
+    if not requisition_text.strip() or not data.instrumento or not data.uasg:
+        return None
+
+    instrument_label = _instrument_mask_label(data.instrumento.tipo)
+    if instrument_label not in {"PE", "CONT", "DISP", "CHAMADA PÚBLICA"}:
+        return None
+
+    context = _build_mask_generation_context(requisition_text, data)
+
+    try:
+        proc = GeminiProcessor()
+    except ValueError as exc:
+        logger.warning("Gemini indisponível para geração de máscara no estágio 2: %s", exc)
+        return None
+
+    prompt = STAGE2_MASK_PROMPT + "\n\nDADOS PARA GERAÇÃO:\n" + json.dumps(
+        context, ensure_ascii=False, indent=2
+    )
+
+    try:
+        result, _, _ = proc._generate(prompt, "stage2_mask_generation")  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha na geração de máscara com IA no estágio 2: %s", exc)
+        return None
+
+    if not isinstance(result, dict):
+        return None
+
+    mask_text = result.get("mascara")
+    confidence_raw = result.get("confidence")
+    pendencias = [
+        _normalize_whitespace(str(p))
+        for p in (result.get("pendencias") or [])
+        if _normalize_whitespace(str(p))
+    ]
+    campos_utilizados = [
+        _normalize_whitespace(str(c)).upper()
+        for c in (result.get("campos_utilizados") or [])
+        if _normalize_whitespace(str(c))
+    ]
+
+    preferred_nd = context.get("nd_mascara_preferencial")
+    uasg_role = context.get("uasg_papel")
+    om_sigla = context.get("om_sigla")
+
+    normalized_mask = _normalize_mask_text(str(mask_text)) if mask_text else None
+    normalized_mask = _apply_preferred_om_to_mask(normalized_mask, om_sigla)
+    normalized_mask = _apply_preferred_nd_to_mask(
+        normalized_mask,
+        preferred_nd,
+        data.nd_req,
+    )
+    normalized_mask = _apply_mask_header_dash(normalized_mask)
+
+    required_missing = []
+    if not normalized_mask:
+        required_missing.append("Máscara não pôde ser montada com segurança.")
+    if not preferred_nd:
+        required_missing.append("ND confiável ausente para a máscara.")
+    if not data.uasg or not data.uasg.codigo:
+        required_missing.append("UASG ausente para a máscara.")
+    if not uasg_role:
+        required_missing.append("Papel da UASG não identificado com segurança.")
+    if not data.instrumento or not data.instrumento.numero or not instrument_label:
+        required_missing.append("Instrumento final inválido para a máscara.")
+
+    if normalized_mask and preferred_nd and not _mask_contains_preferred_nd(normalized_mask, preferred_nd):
+        required_missing.append("Máscara gerada sem a ND coerente com a tabela de itens.")
+    if normalized_mask and data.uasg and data.uasg.codigo and f"UASG {data.uasg.codigo}" not in normalized_mask:
+        required_missing.append("Máscara gerada sem o bloco final obrigatório de UASG.")
+    if normalized_mask and uasg_role and f"({uasg_role})" not in normalized_mask:
+        required_missing.append("Máscara gerada sem o papel obrigatório da UASG.")
+
+    pendencias.extend(context.get("warnings_nd") or [])
+    for pending in required_missing:
+        if pending not in pendencias:
+            pendencias.append(pending)
+
+    try:
+        confidence = int(confidence_raw) if confidence_raw is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+
+    if required_missing:
+        normalized_mask = None
+
+    return Stage2Mask(
+        texto=normalized_mask,
+        confidence=confidence,
+        pendencias=pendencias,
+        campos_utilizados=campos_utilizados,
+    )
+
+
+def generate_nd_and_mask_with_ai(
+    requisition_text: str,
+    data: Stage2Data,
+) -> Tuple[Optional[Stage2NDVerification], Optional[Stage2Mask]]:
+    if not data.itens:
+        return None, None
+
+    nd_context = _build_nd_verification_context(data.itens)
+    mask_context = _build_mask_generation_context(requisition_text, data)
+
+    try:
+        proc = GeminiProcessor()
+    except ValueError as exc:
+        logger.warning("Gemini indisponível para pós-análise de ND/máscara no estágio 2: %s", exc)
+        return None, None
+
+    prompt = (
+        STAGE2_POST_ANALYSIS_PROMPT
+        + "\n\nDADOS PARA ANÁLISE:\n"
+        + json.dumps(
+            {
+                "verificacao_nd": nd_context,
+                "mascara": mask_context,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+    try:
+        result, _, _ = proc._generate(prompt, "stage2_post_analysis")  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha na pós-análise ND/máscara com IA no estágio 2: %s", exc)
+        return None, None
+
+    if not isinstance(result, dict):
+        return None, None
+
+    nd_raw = result.get("verificacao_nd")
+    mask_raw = result.get("mascara")
+
+    nd_result: Optional[Stage2NDVerification] = None
+    if isinstance(nd_raw, dict):
+        itens_result = nd_raw.get("itens") or []
+        verification_items: List[Stage2NDVerificationItem] = []
+        for item_raw in itens_result:
+            if not isinstance(item_raw, dict):
+                continue
+            verification_items.append(
+                Stage2NDVerificationItem(
+                    item=_normalize_item_number(item_raw.get("item")),
+                    nd_informada=_normalize_whitespace(str(item_raw.get("nd_informada") or "")) or None,
+                    status=str(item_raw.get("status") or "nao_avaliado"),
+                    justificativa=_normalize_whitespace(str(item_raw.get("justificativa") or "")) or None,
+                    subelemento_sugerido=_normalize_whitespace(str(item_raw.get("subelemento_sugerido") or "")) or None,
+                    nome_subelemento_sugerido=_normalize_whitespace(
+                        str(item_raw.get("nome_subelemento_sugerido") or "")
+                    )
+                    or None,
+                    confianca=int(item_raw.get("confianca") or 0) or None,
+                )
+            )
+
+        confidence_raw = nd_raw.get("confidence")
+        try:
+            nd_confidence = int(confidence_raw) if confidence_raw is not None else None
+        except (TypeError, ValueError):
+            nd_confidence = None
+
+        nd_result = Stage2NDVerification(
+            resumo=_normalize_whitespace(str(nd_raw.get("resumo") or "")) or None,
+            itens=verification_items,
+            todos_compativeis=bool(nd_raw.get("todos_compativeis", True)),
+            ressalvas=[
+                _normalize_whitespace(str(r))
+                for r in (nd_raw.get("ressalvas") or [])
+                if _normalize_whitespace(str(r))
+            ],
+            confidence=nd_confidence,
+        )
+
+    mask_result: Optional[Stage2Mask] = None
+    if isinstance(mask_raw, dict):
+        mask_text = mask_raw.get("mascara")
+        confidence_raw = mask_raw.get("confidence")
+        pendencias = [
+            _normalize_whitespace(str(p))
+            for p in (mask_raw.get("pendencias") or [])
+            if _normalize_whitespace(str(p))
+        ]
+        campos_utilizados = [
+            _normalize_whitespace(str(c)).upper()
+            for c in (mask_raw.get("campos_utilizados") or [])
+            if _normalize_whitespace(str(c))
+        ]
+
+        preferred_nd = mask_context.get("nd_mascara_preferencial")
+        uasg_role = mask_context.get("uasg_papel")
+        om_sigla = mask_context.get("om_sigla")
+        normalized_mask = _normalize_mask_text(str(mask_text)) if mask_text else None
+        normalized_mask = _apply_preferred_om_to_mask(normalized_mask, om_sigla)
+        normalized_mask = _apply_preferred_nd_to_mask(
+            normalized_mask,
+            preferred_nd,
+            data.nd_req,
+        )
+        normalized_mask = _apply_mask_header_dash(normalized_mask)
+
+        required_missing = []
+        if not normalized_mask:
+            required_missing.append("Máscara não pôde ser montada com segurança.")
+        if not preferred_nd:
+            required_missing.append("ND confiável ausente para a máscara.")
+        if not data.uasg or not data.uasg.codigo:
+            required_missing.append("UASG ausente para a máscara.")
+        if not uasg_role:
+            required_missing.append("Papel da UASG não identificado com segurança.")
+        if not data.instrumento or not data.instrumento.numero or not _instrument_mask_label(data.instrumento.tipo):
+            required_missing.append("Instrumento final inválido para a máscara.")
+
+        if normalized_mask and preferred_nd and not _mask_contains_preferred_nd(normalized_mask, preferred_nd):
+            required_missing.append("Máscara gerada sem a ND coerente com a tabela de itens.")
+        if normalized_mask and data.uasg and data.uasg.codigo and f"UASG {data.uasg.codigo}" not in normalized_mask:
+            required_missing.append("Máscara gerada sem o bloco final obrigatório de UASG.")
+        if normalized_mask and uasg_role and f"({uasg_role})" not in normalized_mask:
+            required_missing.append("Máscara gerada sem o papel obrigatório da UASG.")
+
+        pendencias.extend(mask_context.get("warnings_nd") or [])
+        for pending in required_missing:
+            if pending not in pendencias:
+                pendencias.append(pending)
+
+        try:
+            mask_confidence = int(confidence_raw) if confidence_raw is not None else None
+        except (TypeError, ValueError):
+            mask_confidence = None
+
+        if required_missing:
+            normalized_mask = None
+
+        mask_result = Stage2Mask(
+            texto=normalized_mask,
+            confidence=mask_confidence,
+            pendencias=pendencias,
+            campos_utilizados=campos_utilizados,
+        )
+
+    return nd_result, mask_result
+
+
 def _build_stage2_uasg(
     codigo: Optional[str],
     nome: Optional[str],
@@ -3874,7 +4594,7 @@ def run(
             method="regex",
             data=None,
             confidence=None,
-            inactive_fields=["mascara"],
+            inactive_fields=[],
         )
         return result.model_dump()
 
@@ -3886,7 +4606,7 @@ def run(
             method="regex",
             data=None,
             confidence=None,
-            inactive_fields=["mascara"],
+            inactive_fields=[],
         )
         return result.model_dump()
 
@@ -3967,7 +4687,6 @@ def run(
         valor_total = float(total_dec)
 
     verificacao = verify_calculations(items, valor_total)
-    verificacao_nd = verify_nd_with_ai(items)
 
     # ND agregada da requisição (nd_req) calculada a partir das NDs finais dos itens.
     nd_req = compute_nd_req_from_items(items)
@@ -4070,9 +4789,17 @@ def run(
         nd_req=nd_req,
         itens=items,
         verificacao_calculos=verificacao,
-        verificacao_nd=verificacao_nd,
+        verificacao_nd=None,
+        mascara_personalizada=None,
         extracted_by_ai=extracted_by_ai,
     )
+
+    verificacao_nd, mascara_personalizada = generate_nd_and_mask_with_ai(
+        requisition_text,
+        data,
+    )
+    data.verificacao_nd = verificacao_nd
+    data.mascara_personalizada = mascara_personalizada
 
     used_ai = False
     ai_conf: Optional[int] = None
@@ -4173,7 +4900,7 @@ def run(
         method=method,
         data=data,
         confidence=confidence,
-        inactive_fields=["mascara"],
+        inactive_fields=[],
     )
 
     return result.model_dump()

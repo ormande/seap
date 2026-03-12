@@ -214,6 +214,13 @@ export type Stage2NDVerification = {
   confidence: number | null;
 };
 
+export type Stage2Mask = {
+  texto: string | null;
+  confidence: number | null;
+  pendencias: string[];
+  campos_utilizados: string[];
+};
+
 export type Stage2Data = {
   instrumento: Stage2Instrument | null;
   uasg: Stage2UASG | null;
@@ -228,6 +235,7 @@ export type Stage2Data = {
   itens: Stage2Item[];
   verificacao_calculos: Stage2VerificacaoCalculos | null;
   verificacao_nd: Stage2NDVerification | null;
+  mascara_personalizada: Stage2Mask | null;
   extracted_by_ai: boolean;
 };
 

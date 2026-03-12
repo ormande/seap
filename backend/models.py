@@ -537,6 +537,27 @@ class Stage2NDVerification(BaseModel):
     )
 
 
+class Stage2Mask(BaseModel):
+    """Máscara personalizada gerada para a requisição."""
+
+    texto: Optional[str] = Field(
+        default=None,
+        description="Máscara final padronizada para uso operacional no SEAP/Comprasnet.",
+    )
+    confidence: Optional[int] = Field(
+        default=None,
+        description="Confiança da geração da máscara (0 a 100).",
+    )
+    pendencias: List[str] = Field(
+        default_factory=list,
+        description="Pendências ou ressalvas encontradas durante a montagem/validação da máscara.",
+    )
+    campos_utilizados: List[str] = Field(
+        default_factory=list,
+        description="Lista resumida dos campos/contextos usados para montar a máscara.",
+    )
+
+
 class Stage2Data(BaseModel):
     """Dados extraídos no estágio 2 (análise da peça da requisição)."""
 
@@ -604,12 +625,17 @@ class Stage2Data(BaseModel):
         default=None,
         description="Verificação interpretativa de compatibilidade entre ND/SI e a natureza do item.",
     )
+    mascara_personalizada: Optional["Stage2Mask"] = Field(
+        default=None,
+        description="Máscara padronizada gerada a partir da requisição e validada contra o contexto do estágio 2.",
+    )
     extracted_by_ai: bool = Field(
         default=False,
         description="Indica se a tabela de itens foi extraída usando IA (ex.: OCR/vision).",
     )
 
 
+Stage2Mask.model_rebuild()
 Stage2NDVerification.model_rebuild()
 Stage2Data.model_rebuild()
 

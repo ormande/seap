@@ -5,6 +5,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table';
+import { Check, Copy } from 'lucide-react';
 
 import { addUASG } from '../../lib/api';
 import type {
@@ -39,6 +40,7 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
 }) => {
   const [showDivergences, setShowDivergences] = useState(false);
   const [showNdVerification, setShowNdVerification] = useState(false);
+  const [maskCopied, setMaskCopied] = useState(false);
   const [uasgNomeInput, setUasgNomeInput] = useState('');
   const [uasgAdding, setUasgAdding] = useState(false);
   const [uasgError, setUasgError] = useState<string | null>(null);
@@ -47,6 +49,18 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
   const divergencias: Stage2Divergencia[] =
     data?.verificacao_calculos?.divergencias ?? [];
   const ndVerification = data?.verificacao_nd ?? null;
+
+  const handleCopyMask = async () => {
+    const maskText = data?.mascara_personalizada?.texto;
+    if (!maskText) return;
+    try {
+      await navigator.clipboard.writeText(maskText);
+      setMaskCopied(true);
+      window.setTimeout(() => setMaskCopied(false), 1800);
+    } catch {
+      setMaskCopied(false);
+    }
+  };
 
   const totalFromItems = useMemo(() => {
     return items.reduce((acc, item) => acc + (item.valor_total ?? 0), 0);
@@ -431,6 +445,88 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
         </div>
       </div>
 
+      <div className="space-y-3 rounded-xl border border-[var(--border-subtle)]/80 bg-[var(--bg-main)]/40 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-medium text-[var(--text-secondary)]">
+              Máscara personalizada
+            </p>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+              Gerada a partir do texto completo da requisição e validada contra a ND dos itens.
+            </p>
+          </div>
+          {data?.mascara_personalizada?.texto ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
+              ✓ Máscara pronta
+            </span>
+          ) : data?.mascara_personalizada?.pendencias?.length ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-100">
+              ! Pendências na máscara
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-70 dark:bg-slate-500/20 dark:text-slate-200">
+              Máscara indisponível
+            </span>
+          )}
+        </div>
+
+        {data?.mascara_personalizada?.texto ? (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-200">
+                Máscara final
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCopyMask();
+                }}
+                className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-700 shadow-sm shadow-emerald-500/20 transition hover:bg-emerald-500/20 dark:border-emerald-400/50 dark:text-emerald-200"
+              >
+                {maskCopied ? (
+                  <>
+                    <Check className="h-3 w-3" />
+                    Copiado!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" />
+                    Copiar
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-sm font-semibold leading-relaxed text-[var(--text-primary)]">
+              {data.mascara_personalizada.texto}
+            </p>
+            {data.mascara_personalizada.campos_utilizados.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {data.mascara_personalizada.campos_utilizados.map((campo) => (
+                  <span
+                    key={campo}
+                    className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                  >
+                    {campo}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {!data?.mascara_personalizada?.texto &&
+          data?.mascara_personalizada?.pendencias?.length ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-[11px] text-amber-950 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-50">
+              <p className="mb-2 font-semibold">Pendências para gerar a máscara:</p>
+              <ul className="space-y-1">
+                {data.mascara_personalizada.pendencias.map((pendencia, idx) => (
+                  <li key={idx}>{pendencia}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+      </div>
+
       {/* Seção inferior: verificações */}
       <div className="space-y-3 rounded-xl border border-[var(--border-subtle)]/80 bg-[var(--bg-main)]/40 p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -479,9 +575,6 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
               Verificação de ND indisponível
             </span>
           )}
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold text-slate-700 opacity-70 dark:bg-slate-500/20 dark:text-slate-200">
-            Máscara personalizada — Em breve
-          </span>
         </div>
 
         {!data?.verificacao_calculos?.correto && divergencias.length > 0 && (
