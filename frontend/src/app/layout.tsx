@@ -23,7 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <body className={`${comfortaa.variable} font-sans antialiased`}>
+      <body className={`${comfortaa.variable} font-sans antialiased`} suppressHydrationWarning>
         <AuthProvider>
           <ThemeProvider>
             <AppShell>{children}</AppShell>
