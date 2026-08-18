@@ -1,7 +1,9 @@
 """
-Módulo de IA para estruturação de dados extraídos de PDFs de licitações
-usando Google Gemini 2.5 Flash.
+Módulo de IA para estruturação e auditoria de dados extraídos de PDFs de licitações
+do Exército Brasileiro usando Google Gemini Multimodal.
 """
+
+from __future__ import annotations
 
 import base64
 import json
@@ -9,11 +11,12 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional
 
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
 # Carrega .env do diretório backend (ou raiz do projeto).
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -24,30 +27,122 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# Custo aproximado por 1M tokens (Gemini 2.5 Flash, preços típicos em USD).
-# Ajuste conforme a tabela oficial do Google.
-INPUT_COST_PER_1M = 0.075
-OUTPUT_COST_PER_1M = 0.30
+# Modelos recomendados em ordem de preferência
+CANDIDATE_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
+    "gemini-3.5-flash-lite",
+]
+
+# --- Schemas Pydantic para Structured Output ---
 
 
-def _log_token_usage(
-    prompt_tokens: int,
-    output_tokens: int,
-    operation: str,
-) -> None:
-    """Registra uso de tokens e custo aproximado da chamada."""
-    total = prompt_tokens + output_tokens
-    cost = (prompt_tokens / 1_000_000 * INPUT_COST_PER_1M) + (
-        output_tokens / 1_000_000 * OUTPUT_COST_PER_1M
+class RequisitionItemOutput(BaseModel):
+    item: Optional[int] = Field(
+        None, description="Número sequencial do item na requisição (ex: 1, 2, 3...)"
     )
-    logger.info(
-        "Gemini tokens | operação=%s | input=%s | output=%s | total=%s | custo_aprox_usd=%.6f",
-        operation,
-        prompt_tokens,
-        output_tokens,
-        total,
-        cost,
+    catmat: Optional[str] = Field(
+        None, description="Código CatMat ou CatSer do material/serviço (ex: 150234)"
     )
+    descricao: str = Field(
+        ..., description="Descrição completa e detalhada do material ou serviço"
+    )
+    unidade: Optional[str] = Field(
+        None, description="Unidade de fornecimento (ex: UND, UN, CX, PCT, KG, SV, RESMA, FRASCO)"
+    )
+    quantidade: Optional[float] = Field(
+        None, description="Quantidade requisitada (numérica)"
+    )
+    valor_unitario: Optional[float] = Field(
+        None, description="Valor unitário do item em Reais (R$)"
+    )
+    valor_total: Optional[float] = Field(
+        None, description="Valor total do item (quantidade * valor_unitario)"
+    )
+    nd_subelemento: Optional[str] = Field(
+        None,
+        description="Natureza de Despesa / Subelemento se informado na linha (ex: 33.90.30.24 ou 30/24)",
+    )
+
+
+class RequisitionTableOutput(BaseModel):
+    fornecedor: Optional[str] = Field(
+        None, description="Razão Social ou Nome do Fornecedor / Empresa vencedora"
+    )
+    cnpj: Optional[str] = Field(
+        None, description="CNPJ do Fornecedor formatado (00.000.000/0000-00) ou numérico"
+    )
+    valor_total_geral: Optional[float] = Field(
+        None, description="Valor total geral da requisição / somatório dos itens"
+    )
+    tipo_empenho: Optional[str] = Field(
+        None, description="Tipo de empenho selecionado: ORDINARIO, GLOBAL ou ESTIMATIVO"
+    )
+    itens: List[RequisitionItemOutput] = Field(
+        default_factory=list, description="Lista de itens extraídos da tabela de materiais/serviços"
+    )
+
+
+class HeaderOutput(BaseModel):
+    numero_processo: Optional[str] = Field(None, description="NUP / Número do Processo (ex: 64136.000532/2026-31)")
+    uasg: Optional[str] = Field(None, description="Código UASG de 6 dígitos (ex: 160136)")
+    orgao: Optional[str] = Field(None, description="Nome da Organização Militar / Unidade requisitante")
+    modalidade: Optional[str] = Field(None, description="Modalidade da licitação (ex: Pregão Eletrônico, Dispensa, Inexigibilidade)")
+    objeto: Optional[str] = Field(None, description="Descrição resumida do objeto da aquisição")
+    data: Optional[str] = Field(None, description="Data do documento no formato ISO YYYY-MM-DD quando disponível")
+
+
+class SupplierOutput(BaseModel):
+    cnpj: Optional[str] = Field(None, description="CNPJ formatado do fornecedor")
+    razao_social: Optional[str] = Field(None, description="Razão social da empresa")
+    nome_fantasia: Optional[str] = Field(None, description="Nome fantasia")
+    endereco: Optional[str] = Field(None, description="Logradouro e número")
+    municipio: Optional[str] = Field(None, description="Cidade")
+    uf: Optional[str] = Field(None, description="Sigla do estado (ex: MS, SP)")
+
+
+class DispatchOutput(BaseModel):
+    resumo: str = Field(..., description="Resumo sucinto do despacho em 1 a 2 frases")
+    status: str = Field(..., description="Exatamente um de: 'aprovado', 'pendente', 'com_ressalvas'")
+    problemas_identificados: List[str] = Field(default_factory=list, description="Problemas ou irregularidades apontados")
+    acoes_necessarias: List[str] = Field(default_factory=list, description="Ações recomendadas para saneamento")
+
+
+class NDClassificationOutput(BaseModel):
+    subelemento: Optional[str] = Field(None, description="Código ou nome do subelemento mais adequado")
+    codigo_nd: Optional[str] = Field(None, description="Código da ND (ex: 3.3.90.30)")
+    confianca: str = Field(default="media", description="'alta', 'media' ou 'baixa'")
+
+
+class VerificationOutput(BaseModel):
+    score_confianca: float = Field(..., description="Score de 0.0 a 1.0 indicando conformidade da extração")
+    correcoes: List[Dict[str, Any]] = Field(default_factory=list, description="Correções sugeridas")
+
+
+# --- Prompts Especializados do Exército Brasileiro ---
+
+MILITARY_TABLE_SYSTEM_PROMPT = """Você é um especialista em análise e auditoria de processos de compras e licitações do Exército Brasileiro.
+Sua missão é extrair rigorosamente os dados da Tabela de Itens (Quadro de Material / Serviço a ser adquirido) da Requisição Militar.
+
+Orientações de extração:
+1. Extraia CADA ITEM individualmente da tabela (Item, CatMat, Descrição, Unidade, Quantidade, Valor Unitário, Valor Total, ND/Subelemento).
+2. Se o documento contiver dados de Fornecedor (Razão Social, CNPJ), Tipo de Empenho (Ordinário, Global, Estimativo) e Valor Total Geral, extraia-os.
+3. Para valores monetários e quantidades, extraia números puros (ex: 1250.50 e não "R$ 1.250,50"). Use ponto como separador decimal.
+4. Normalize unidades comuns (UND, UN, CX, PCT, KG, SV, RESMA, FRASCO, PAR, MT).
+5. Certifique-se de que cada linha seja capturada na ordem correta, mesmo que a tabela continue em múltiplas páginas.
+
+Exemplo de estrutura militar esperada:
+- Item: 1
+- CatMat: "150234"
+- Descrição: "CANETA ESFEROGRÁFICA AZUL 1.0MM"
+- Unidade: "UND"
+- Quantidade: 100.0
+- Valor Unitário: 2.50
+- Valor Total: 250.00
+- ND/Subelemento: "33.90.30.24"
+"""
 
 
 def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
@@ -59,7 +154,15 @@ def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
         except Exception as e:
             last_error = e
             msg = str(e).lower()
-            if "rate" in msg or "resource" in msg or "429" in msg or "timeout" in msg:
+            if (
+                "rate" in msg
+                or "resource" in msg
+                or "429" in msg
+                or "timeout" in msg
+                or "503" in msg
+                or "unavailable" in msg
+                or "spikes in demand" in msg
+            ):
                 delay = base_delay * (2**attempt)
                 logger.warning(
                     "Tentativa %s/%s falhou (%s). Aguardando %.1fs.",
@@ -76,12 +179,9 @@ def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
 
 class GeminiProcessor:
     """
-    Processador de texto/tabelas extraídos usando Gemini 2.5 Flash
-    para gerar JSON estruturado validado.
+    Processador de IA Multimodal usando Google Gemini para extração e
+    estruturação de documentos militares com validação rigorosa de schemas.
     """
-
-    MODEL_NAME = "gemini-2.5-flash"
-    VISION_MODEL_NAME = "gemini-2.5-pro"
 
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or os.getenv("GEMINI_API_KEY")
@@ -91,31 +191,65 @@ class GeminiProcessor:
             )
         self._client = genai.Client(api_key=key)
 
-    def _generate(self, prompt: str, operation: str) -> tuple[dict[str, Any], int, int]:
-        """
-        Chama o modelo e retorna (resposta_parseada, input_tokens, output_tokens).
-        Aplica retry exponencial e log de custo.
-        """
-        def _call() -> Any:
-            return self._client.models.generate_content(
-                model=self.MODEL_NAME,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1,
-                ),
-            )
+    def _call_model_with_fallback(
+        self,
+        contents: Any,
+        schema: Any = None,
+        system_instruction: Optional[str] = None,
+        temperature: float = 0.1,
+    ) -> Any:
+        """Tenta a chamada no modelo prioritário e faz fallback automático se o modelo estiver indisponível."""
+        last_err = None
+        for model_name in CANDIDATE_MODELS:
+            try:
+                config_kwargs: Dict[str, Any] = {
+                    "temperature": temperature,
+                }
+                if schema is not None:
+                    config_kwargs["response_mime_type"] = "application/json"
+                    config_kwargs["response_schema"] = schema
+                else:
+                    config_kwargs["response_mime_type"] = "application/json"
 
-        response = _retry_with_backoff(lambda: _call())
+                if system_instruction:
+                    config_kwargs["system_instruction"] = system_instruction
+
+                config = types.GenerateContentConfig(**config_kwargs)
+
+                def _exec():
+                    return self._client.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
+                    )
+
+                response = _retry_with_backoff(_exec, max_retries=2, base_delay=1.0)
+                return response
+            except Exception as exc:
+                last_err = exc
+                err_msg = str(exc).lower()
+                logger.warning("Modelo %s indisponível (%s). Tentando próximo modelo...", model_name, exc)
+                if "not_found" in err_msg or "404" in err_msg or "503" in err_msg or "unavailable" in err_msg:
+                    continue
+                # Se for outro erro, continua tentando fallback
+                continue
+
+        if last_err:
+            raise last_err
+        raise RuntimeError("Nenhum modelo do Gemini respondeu com sucesso.")
+
+    def _generate(
+        self, prompt: str, schema: Any = None, operation: str = "general"
+    ) -> tuple[dict[str, Any], int, int]:
+        """Gera resposta estruturada a partir de texto."""
+        response = self._call_model_with_fallback(contents=prompt, schema=schema)
         usage = getattr(response, "usage_metadata", None)
         input_tokens = getattr(usage, "prompt_token_count", 0) or 0
         output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-        _log_token_usage(input_tokens, output_tokens, operation)
 
         text = (response.text or "").strip()
         if not text:
             return {}, input_tokens, output_tokens
-        # Remove possíveis blocos markdown ```json ... ```
         if text.startswith("```"):
             lines = text.split("\n")
             if lines[0].startswith("```"):
@@ -123,16 +257,22 @@ class GeminiProcessor:
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines)
-        return json.loads(text), input_tokens, output_tokens
+        try:
+            return json.loads(text), input_tokens, output_tokens
+        except json.JSONDecodeError:
+            logger.warning("Falha ao decodificar JSON gerado: %s", text[:200])
+            return {}, input_tokens, output_tokens
 
     def _generate_with_images(
-        self, prompt: str, images_base64: list[str], operation: str
+        self,
+        prompt: str,
+        images_base64: list[str],
+        schema: Any = None,
+        system_instruction: Optional[str] = None,
+        operation: str = "vision",
     ) -> tuple[dict[str, Any], int, int]:
-        """
-        Igual ao _generate, mas envia texto + imagens ao modelo.
-        Usa types.Part.from_text e types.Part.from_bytes para montar o contents.
-        """
-        content_parts = [types.Part.from_text(text=prompt)]
+        """Envia imagens em alta resolução + prompt diretamente ao Gemini Multimodal."""
+        content_parts: List[Any] = [types.Part.from_text(text=prompt)]
         for b64 in images_base64:
             if not b64:
                 continue
@@ -143,21 +283,14 @@ class GeminiProcessor:
                 )
             )
 
-        def _call() -> Any:
-            return self._client.models.generate_content(
-                model=self.VISION_MODEL_NAME,
-                contents=content_parts,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1,
-                ),
-            )
-
-        response = _retry_with_backoff(lambda: _call())
+        response = self._call_model_with_fallback(
+            contents=content_parts,
+            schema=schema,
+            system_instruction=system_instruction,
+        )
         usage = getattr(response, "usage_metadata", None)
         input_tokens = getattr(usage, "prompt_token_count", 0) or 0
         output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-        _log_token_usage(input_tokens, output_tokens, operation)
 
         text = (response.text or "").strip()
         if not text:
@@ -169,146 +302,100 @@ class GeminiProcessor:
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines)
-        return json.loads(text), input_tokens, output_tokens
+        try:
+            return json.loads(text), input_tokens, output_tokens
+        except json.JSONDecodeError:
+            logger.warning("Falha ao decodificar JSON multimodal: %s", text[:200])
+            return {}, input_tokens, output_tokens
 
-    def generate_text(self, prompt: str, operation: str = "text") -> str:
-        """Gera texto puro (sem forçar JSON)."""
-        def _call() -> Any:
-            return self._client.models.generate_content(
-                model=self.MODEL_NAME,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.1,
-                ),
-            )
-        response = _retry_with_backoff(lambda: _call())
-        usage = getattr(response, "usage_metadata", None)
-        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-        _log_token_usage(input_tokens, output_tokens, operation)
-        return (response.text or "").strip()
-
-    def structure_header(self, texto: str) -> dict[str, Any]:
+    def extract_table_from_images(
+        self,
+        images_base64: list[str],
+        additional_context: str = "",
+    ) -> dict[str, Any]:
         """
-        Extrai do texto de cabeçalho: número do processo, UASG, órgão,
-        modalidade, objeto e data. Retorna JSON com null para não encontrados.
+        Extrai itens e dados gerais de tabelas escaneadas / imagens usando
+        o Gemini Multimodal com Structured Output estrito.
         """
-        prompt = """Você é um assistente que extrai dados estruturados de trechos de documentos de licitação do Exército Brasileiro.
+        prompt = (
+            "Analise as imagens da requisição militar em anexo e extraia a tabela completa de itens "
+            "com fornecedor, CNPJ, valor total geral e tipo de empenho."
+        )
+        if additional_context:
+            prompt += f"\n\nContexto adicional extraído do documento:\n{additional_context}"
 
-Tarefa: a partir do TEXTO abaixo, extraia os campos listados e retorne APENAS um objeto JSON válido, sem texto adicional. Use null para qualquer campo não encontrado.
-
-Campos obrigatórios no JSON:
-- numero_processo (string ou null)
-- uasg (string ou null)
-- orgao (string ou null)
-- modalidade (string ou null, ex: Pregão Eletrônico, Concorrência)
-- objeto (string ou null, descrição do objeto da licitação)
-- data (string ou null, em formato ISO quando possível)
-
-Exemplo de entrada:
-"Processo nº 21.001.567890/2024-12. UASG 123456. Requisição de 1º Batalhão. Objeto: Aquisição de material de escritório."
-
-Exemplo de saída (apenas o JSON):
-{"numero_processo": "21.001.567890/2024-12", "uasg": "123456", "orgao": "1º Batalhão", "modalidade": null, "objeto": "Aquisição de material de escritório.", "data": null}
-
----
-TEXTO:
-"""
-        prompt += texto
-        result, _, _ = self._generate(prompt, "structure_header")
+        result, _, _ = self._generate_with_images(
+            prompt=prompt,
+            images_base64=images_base64,
+            schema=RequisitionTableOutput,
+            system_instruction=MILITARY_TABLE_SYSTEM_PROMPT,
+            operation="extract_table_from_images",
+        )
         return result
 
     def structure_items(self, texto_ou_tabela: str | list) -> dict[str, Any]:
-        """
-        Extrai lista de itens com descrição, quantidade, unidade,
-        valor_unitario e valor_total. Aceita texto ou tabela (lista de linhas).
-        """
+        """Extrai lista de itens a partir de texto ou tabela TSV."""
         if isinstance(texto_ou_tabela, list):
-            # Serializa tabela para string (ex.: lista de listas)
             import io
             buf = io.StringIO()
             for row in texto_ou_tabela:
                 buf.write("\t".join(str(c) for c in row) + "\n")
             texto_ou_tabela = buf.getvalue()
 
-        prompt = """Você é um assistente que extrai itens de licitação (quadro demonstrativo) em JSON.
-
-Tarefa: a partir do TEXTO ou TABELA abaixo, extraia cada item e retorne APENAS um objeto JSON válido com uma chave "itens" cuja valor é uma lista de objetos. Cada objeto deve ter: descricao (string), quantidade (number ou null), unidade (string ou null), valor_unitario (number ou null), valor_total (number ou null). Use null para campos não encontrados.
-
-Exemplo de entrada (tabela):
-Item	Descrição	Qtd	Un	Valor Unit.	Valor Total
-01	Caneta esferográfica	100	UN	2.50	250.00
-02	Resma papel A4	20	RESMA	28.00	560.00
-
-Exemplo de saída (apenas o JSON):
-{"itens": [{"descricao": "Caneta esferográfica", "quantidade": 100, "unidade": "UN", "valor_unitario": 2.50, "valor_total": 250.00}, {"descricao": "Resma papel A4", "quantidade": 20, "unidade": "RESMA", "valor_unitario": 28.00, "valor_total": 560.00}]}
-
----
-TEXTO/TABELA:
-"""
-        prompt += str(texto_ou_tabela)
-        result, _, _ = self._generate(prompt, "structure_items")
+        prompt = (
+            "A partir do texto/tabela abaixo, extraia todos os itens da requisição em formato estruturado.\n\n"
+            f"TEXTO/TABELA:\n{texto_ou_tabela}"
+        )
+        result, _, _ = self._generate(
+            prompt=prompt,
+            schema=RequisitionTableOutput,
+            operation="structure_items",
+        )
         return result
 
-    def analyze_dispatch(self, texto: str) -> dict[str, Any]:
-        """
-        Analisa texto de despacho e retorna: resumo, status
-        (aprovado/pendente/com_ressalvas), problemas_identificados e acoes_necessarias.
-        """
-        prompt = """Você é um assistente que analisa despachos e pareceres de processos licitatórios.
-
-Tarefa: analise o TEXTO abaixo e retorne APENAS um objeto JSON válido com:
-- resumo (string): resumo do despacho em uma ou duas frases
-- status (string): exatamente um de "aprovado", "pendente", "com_ressalvas"
-- problemas_identificados (array de strings): lista de problemas citados, ou []
-- acoes_necessarias (array de strings): lista de ações recomendadas, ou []
-
-Use null apenas onde fizer sentido; arrays vazios quando não houver itens.
-
-Exemplo de entrada:
-"Despacho: Analisado o processo, determino a aprovação para aquisição. Fica pendente a entrega da documentação fiscal."
-
-Exemplo de saída (apenas o JSON):
-{"resumo": "Aprovação para aquisição com pendência de documentação fiscal.", "status": "com_ressalvas", "problemas_identificados": ["Documentação fiscal não entregue"], "acoes_necessarias": ["Entregar documentação fiscal"]}
-
----
-TEXTO:
-"""
-        prompt += texto
-        result, _, _ = self._generate(prompt, "analyze_dispatch")
+    def structure_header(self, texto: str) -> dict[str, Any]:
+        """Extrai campos do cabeçalho da licitação militar."""
+        prompt = (
+            "Extraia os dados de cabeçalho deste documento de licitação do Exército Brasileiro:\n\n"
+            f"TEXTO:\n{texto}"
+        )
+        result, _, _ = self._generate(
+            prompt=prompt,
+            schema=HeaderOutput,
+            operation="structure_header",
+        )
         return result
 
     def structure_fornecedor(self, texto: str) -> dict[str, Any]:
-        """
-        Extrai dados do fornecedor: CNPJ, razão social, endereço etc.
-        Retorna JSON com null para campos não encontrados.
-        """
-        prompt = """Você é um assistente que extrai dados de fornecedor de documentos de licitação.
+        """Extrai dados cadastrais do fornecedor."""
+        prompt = (
+            "Extraia os dados do fornecedor / empresa contratada a partir do texto:\n\n"
+            f"TEXTO:\n{texto}"
+        )
+        result, _, _ = self._generate(
+            prompt=prompt,
+            schema=SupplierOutput,
+            operation="structure_fornecedor",
+        )
+        return result
 
-Tarefa: a partir do TEXTO abaixo, extraia os campos e retorne APENAS um objeto JSON válido. Use null para qualquer campo não encontrado.
-
-Campos: cnpj (string ou null), razao_social (string ou null), nome_fantasia (string ou null), endereco (string ou null), municipio (string ou null), uf (string ou null).
-
-Exemplo de entrada:
-"Fornecedor: Empresa ABC Ltda. CNPJ 12.345.678/0001-90. Endereço: Rua X, 100 - São Paulo/SP."
-
-Exemplo de saída (apenas o JSON):
-{"cnpj": "12.345.678/0001-90", "razao_social": "Empresa ABC Ltda", "nome_fantasia": null, "endereco": "Rua X, 100", "municipio": "São Paulo", "uf": "SP"}
-
----
-TEXTO:
-"""
-        prompt += texto
-        result, _, _ = self._generate(prompt, "structure_fornecedor")
+    def analyze_dispatch(self, texto: str) -> dict[str, Any]:
+        """Analisa despachos e pareceres de processos licitatórios."""
+        prompt = (
+            "Analise o despacho/parecer do processo licitatório militar e classifique o status:\n\n"
+            f"TEXTO:\n{texto}"
+        )
+        result, _, _ = self._generate(
+            prompt=prompt,
+            schema=DispatchOutput,
+            operation="analyze_dispatch",
+        )
         return result
 
     def classify_nd(
         self, descricao_item: str, tabela_nd: str | list
     ) -> dict[str, Any]:
-        """
-        Dada a descrição do item e uma tabela de natureza de despesa,
-        retorna o subelemento mais provável.
-        """
+        """Classifica item na Natureza de Despesa (ND) e subelemento correspondente."""
         if isinstance(tabela_nd, list):
             import io
             buf = io.StringIO()
@@ -316,54 +403,33 @@ TEXTO:
                 buf.write("\t".join(str(c) for c in row) + "\n")
             tabela_nd = buf.getvalue()
 
-        prompt = """Você é um assistente que classifica itens de licitação em natureza de despesa (ND).
-
-Tarefa: com base na DESCRIÇÃO do item e na TABELA de natureza de despesa (código / descrição / subelemento), retorne APENAS um objeto JSON válido com:
-- subelemento (string ou null): o código ou nome do subelemento mais adequado
-- codigo_nd (string ou null): código da ND se disponível na tabela
-- confianca (string): "alta", "media" ou "baixa"
-
-Exemplo de entrada:
-Descrição: "Caneta esferográfica azul"
-Tabela ND:
-3.3.90.30	Material de consumo p/ escritório	3.3.90.30.01
-3.3.90.39	Outros materiais	3.3.90.39.00
-
-Exemplo de saída (apenas o JSON):
-{"subelemento": "3.3.90.30.01", "codigo_nd": "3.3.90.30", "confianca": "alta"}
-
----
-DESCRIÇÃO DO ITEM:
-"""
-        prompt += descricao_item + "\n\nTABELA ND:\n" + str(tabela_nd)
-        result, _, _ = self._generate(prompt, "classify_nd")
+        prompt = (
+            f"Classifique o item de requisição na Natureza de Despesa correta.\n\n"
+            f"DESCRIÇÃO DO ITEM:\n{descricao_item}\n\n"
+            f"TABELA DE REFERÊNCIA ND:\n{tabela_nd}"
+        )
+        result, _, _ = self._generate(
+            prompt=prompt,
+            schema=NDClassificationOutput,
+            operation="classify_nd",
+        )
         return result
 
     def verify_extraction(
         self, texto_original: str, json_extraido: str | dict
     ) -> dict[str, Any]:
-        """
-        Segunda etapa: compara texto original com o JSON extraído e retorna
-        score de confiança (0-1) e lista de correções sugeridas.
-        """
+        """Compara o texto original com o JSON extraído para auditoria de fidelidade."""
         if isinstance(json_extraido, dict):
             json_extraido = json.dumps(json_extraido, ensure_ascii=False, indent=2)
 
-        prompt = """Você é um revisor que verifica se os dados extraídos de um documento batem com o texto original.
-
-Tarefa: compare o TEXTO ORIGINAL com o JSON EXTRAÍDO e retorne APENAS um objeto JSON válido com:
-- score_confianca (number): entre 0 e 1 (1 = total aderência)
-- correcoes (array de objetos): cada objeto com "campo" (string), "valor_atual" (string), "sugestao" (string), "motivo" (string). Se não houver correções, retorne []
-
-Exemplo de saída quando está correto (apenas o JSON):
-{"score_confianca": 0.95, "correcoes": []}
-
-Exemplo quando há uma correção (apenas o JSON):
-{"score_confianca": 0.7, "correcoes": [{"campo": "numero_processo", "valor_atual": "21.001.567890", "sugestao": "21.001.567890/2024-12", "motivo": "Faltava ano no texto original"}]}
-
----
-TEXTO ORIGINAL:
-"""
-        prompt += texto_original + "\n\n---\nJSON EXTRAÍDO:\n" + json_extraido
-        result, _, _ = self._generate(prompt, "verify_extraction")
+        prompt = (
+            "Compare o TEXTO ORIGINAL com o JSON EXTRAÍDO e aponte eventuais divergências ou dados faltantes.\n\n"
+            f"TEXTO ORIGINAL:\n{texto_original}\n\n"
+            f"JSON EXTRAÍDO:\n{json_extraido}"
+        )
+        result, _, _ = self._generate(
+            prompt=prompt,
+            schema=VerificationOutput,
+            operation="verify_extraction",
+        )
         return result

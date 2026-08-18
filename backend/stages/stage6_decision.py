@@ -128,14 +128,15 @@ def collect_issues(
                 valor_req = float(stage2.data.valor_total)
                 if total_nc + 0.01 < valor_req:  # margem pequena
                     detalhes = (
-                        f"Valor total das NCs: R$ {_format_brl(total_nc)}; "
-                        f"Valor da requisição: R$ {_format_brl(valor_req)}."
+                        f"Valor total das NCs identificadas: R$ {_format_brl(total_nc)}; "
+                        f"Valor da requisição: R$ {_format_brl(valor_req)}. "
+                        f"Nota informativa: No Exército, a Nota de Crédito descentralizada pode complementar saldo orçamentário pré-existente na célula orçamentária (PTRES/Fonte/ND) da OM no SIAFI."
                     )
                     ressalvas.append(
                         Stage6Issue(
                             estagio=3,
                             tipo="ressalva",
-                            descricao="Somatório das Notas de Crédito inferior ao valor da requisição.",
+                            descricao="Valor da(s) NC(s) inferior ao valor da requisição (verificar se há saldo orçamentário prévio na OM).",
                             detalhes=detalhes,
                         )
                     )

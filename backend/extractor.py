@@ -85,11 +85,10 @@ def get_pages_with_large_images(
 ) -> list[int]:
     """
     Retorna as páginas (1-indexed) que contêm tabelas como IMAGEM e devem
-    ser enviadas ao Azure Document Intelligence para OCR.
+    ser processadas pelo Gemini Multimodal Vision.
 
     Critério principal: página com imagem grande + âncora "6. Material...".
     Fallback: página com imagem grande (sem âncora).
-    Se nenhuma página tem imagem grande, retorna [] (Azure não é necessário).
     """
     primary: list[int] = []  # imagem grande + âncora
     fallback: list[int] = []  # imagem grande sem âncora
@@ -118,14 +117,14 @@ def get_pages_with_large_images(
                     if has_anchor:
                         primary.append(page_num)
                         print(
-                            f"[Ext][] Página {page_num} selecionada para Azure "
+                            f"[Ext][] Página {page_num} selecionada para Gemini Vision "
                             f"(Âncora: True, Img: True)",
                             flush=True,
                         )
                     else:
                         fallback.append(page_num)
                         print(
-                            f"[Ext][] Página {page_num} candidata fallback Azure "
+                            f"[Ext][] Página {page_num} candidata fallback Gemini Vision "
                             f"(Âncora: False, Img: True)",
                             flush=True,
                         )

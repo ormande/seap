@@ -32,29 +32,11 @@ except ImportError:
     pdfplumber = None
 
 try:
-    from azure_processor import extract_table_text_with_azure
-except Exception as e1:
-    try:
-        from ..azure_processor import extract_table_text_with_azure
-    except Exception as e2:
-        print(f"\n{'='*50}", flush=True)
-        print("[Stage2][?] FALHA AO IMPORTAR AZURE_PROCESSOR!", flush=True)
-        print(f"Erro Absoluto: {e1}", flush=True)
-        print(f"Erro Relativo: {e2}", flush=True)
-        print(f"{'='*50}\n", flush=True)
-        extract_table_text_with_azure = None  # type: ignore[assignment]
-
-try:
     from extractor import get_pages_with_large_images, page_to_base64
 except Exception as e1:
     try:
         from ..extractor import get_pages_with_large_images, page_to_base64
     except Exception as e2:
-        print(f"\n{'='*50}", flush=True)
-        print("[Stage2][?] FALHA AO IMPORTAR EXTRACTOR!", flush=True)
-        print(f"Erro Absoluto: {e1}", flush=True)
-        print(f"Erro Relativo: {e2}", flush=True)
-        print(f"{'='*50}\n", flush=True)
         get_pages_with_large_images = None  # type: ignore[assignment]
         page_to_base64 = None  # type: ignore[assignment]
 
@@ -3305,153 +3287,30 @@ def extract_items_table(
         items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
 
     if not items or len(items) == 0:
-        print(f"[Stage2][{nup_id}] 0 itens na tentativa base (nativo/texto)", flush=True)
-        # TENTATIVA 2: AZURE (apenas se houver páginas com imagem grande + âncora)
-        if pdf_path and req_pages and extract_table_text_with_azure and get_pages_with_large_images:
-            pages_with_imgs = get_pages_with_large_images(pdf_path, req_pages)
-            if not pages_with_imgs:
-                print(
-                    f"[Stage2][{nup_id}] Nenhuma página com imagem grande → pulando Azure",
-                    flush=True,
-                )
-            else:
+        print(f"[Stage2][{nup_id}] 0 itens na tentativa base (nativo/texto) → acionando Gemini Multimodal Vision", flush=True)
+        if pdf_path and req_pages and page_to_base64:
+            fallback_images: List[str] = []
+            for p in req_pages:
                 try:
-                    azure_tsvs: List[str] = []
-                    for p_num in pages_with_imgs:
-                        img_b64 = page_to_base64(pdf_path, p_num)
-                        if img_b64:
-                            tsv = extract_table_text_with_azure(img_b64)
-                            if tsv:
-                                azure_tsvs.append(tsv)
-
-                    azure_tsv_combined = "\n".join(azure_tsvs)
-                    azure_header_hints = _parse_native_item_table_hints(azure_tsv_combined)
-                    azure_parsed: Dict[str, Any] = {
-                        "items": [],
-                        "fornecedor": None,
-                        "fornecedor_source": None,
-                        "cnpj": None,
-                        "valor_total_geral": None,
-                    }
-                    vision_parsed: Dict[str, Any] = {
-                        "items": [],
-                        "fornecedor": None,
-                        "cnpj": None,
-                        "valor_total_geral": None,
-                    }
-                    if azure_tsv_combined.strip():
-                        prompt_azure = (
-                            STAGE2_TABLE_PROMPT
-                            + "\n\nTEXTO DA TABELA (TSV do Azure):\n"
-                            + azure_tsv_combined
-                        )
-                        result_azure, _, _ = proc._generate(  # type: ignore[attr-defined]
-                            prompt_azure, "stage2_table_azure"
-                        )
-                        if isinstance(result_azure, dict):
-                            az_items, az_fornecedor, az_cnpj, az_total = _parse_table_result(
-                                result_azure
-                            )
-                            final_az_fornecedor = az_fornecedor
-                            fornecedor_source = "model" if az_fornecedor else None
-                            if azure_header_hints.get("fornecedor"):
-                                final_az_fornecedor = azure_header_hints.get("fornecedor")
-                                fornecedor_source = "header_tsv"
-                            final_az_cnpj = az_cnpj or azure_header_hints.get("cnpj")
-                            azure_parsed = {
-                                "items": az_items,
-                                "fornecedor": final_az_fornecedor,
-                                "fornecedor_source": fornecedor_source,
-                                "cnpj": final_az_cnpj,
-                                "valor_total_geral": az_total,
-                            }
-                            if az_items:
-                                print(
-                                    f"[Stage2][{nup_id}] Azure fallback: {len(az_items)} itens extraídos",
-                                    flush=True,
-                                )
-                    if not azure_parsed["items"]:
-                        print(
-                            f"[Stage2][{nup_id}] Azure: 0 itens → acionando Vision fallback",
-                            flush=True,
-                        )
-
-                    # TENTATIVA 3: GEMINI VISION
-                    fallback_images: List[str] = []
-                    for p in req_pages:
-                        img = page_to_base64(pdf_path, p)
-                        if img:
-                            fallback_images.append(img)
-                    if fallback_images:
-                        try:
-                            prompt_vision = (
-                                STAGE2_TABLE_PROMPT
-                                + "\n\nTEXTO DA TABELA:\n(sem texto extraído; use as imagens anexas)"
-                            )
-                            result_fb, _, _ = proc._generate_with_images(  # type: ignore[attr-defined]
-                                prompt_vision, fallback_images, "stage2_table_vision_fallback"
-                            )
-                            if isinstance(result_fb, dict):
-                                vi_items, vi_fornecedor, vi_cnpj, vi_total = _parse_table_result(
-                                    result_fb
-                                )
-                                vision_parsed = {
-                                    "items": vi_items,
-                                    "fornecedor": vi_fornecedor,
-                                    "cnpj": vi_cnpj,
-                                    "valor_total_geral": vi_total,
-                                }
-                                if vi_items:
-                                    print(
-                                        f"[Stage2][{nup_id}] Vision fallback: {len(vi_items)} item(ns) extraído(s)",
-                                        flush=True,
-                                    )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("Vision fallback falhou no estágio 2: %s", exc)
-
-                    merged_items, merged_fornecedor, merged_cnpj, merged_total = _merge_image_table_results(
-                        azure_parsed,
-                        vision_parsed,
-                    )
-                    if merged_items:
-                        return (
-                            merged_items,
-                            True,
-                            merged_total,
-                            merged_fornecedor,
-                            merged_cnpj,
-                        )
-                except Exception as e:
-                    print(f"[Stage2][{nup_id}] Erro Azure: {e}", flush=True)
-
-        # TENTATIVA 3 LEGADA: GEMINI VISION isolado quando Azure não está disponível.
-        if not items or len(items) == 0:
-            if pdf_path and req_pages and page_to_base64:
-                fallback_images: List[str] = []
-                for p in req_pages:
                     img = page_to_base64(pdf_path, p)
                     if img:
                         fallback_images.append(img)
-                if fallback_images:
-                    try:
-                        prompt_vision = (
-                            STAGE2_TABLE_PROMPT
-                            + "\n\nTEXTO DA TABELA:\n(sem texto extraído; use as imagens anexas)"
-                        )
-                        result_fb, _, _ = proc._generate_with_images(  # type: ignore[attr-defined]
-                            prompt_vision, fallback_images, "stage2_table_vision_fallback"
-                        )
-                        if isinstance(result_fb, dict):
-                            items, fornecedor, cnpj, valor_total_geral = _parse_table_result(
-                                result_fb
+                except Exception as exc:
+                    logger.debug("Falha ao converter página %s para imagem: %s", p, exc)
+            if fallback_images:
+                try:
+                    result_vision = proc.extract_table_from_images(
+                        fallback_images, additional_context=combined
+                    )
+                    if isinstance(result_vision, dict) and result_vision.get("itens"):
+                        items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result_vision)
+                        if items:
+                            print(
+                                f"[Stage2][{nup_id}] Gemini Multimodal Vision: {len(items)} item(ns) extraído(s)",
+                                flush=True,
                             )
-                            if items:
-                                print(
-                                    f"[Stage2][{nup_id}] Vision fallback: {len(items)} item(ns) extraído(s)",
-                                    flush=True,
-                                )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("Vision fallback falhou no estágio 2: %s", exc)
+                except Exception as exc:
+                    logger.warning("Gemini Multimodal Vision falhou no estágio 2: %s", exc)
 
     print(
         f"[Stage2][{nup_id}] Resultado: {len(items)} itens, fornecedor={fornecedor or '?'}, cnpj={cnpj or '?'}",

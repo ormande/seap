@@ -1,83 +1,70 @@
 from backend.models import Stage2Item
 from backend.stages.stage2_analysis import (
-    _merge_image_table_results,
     _normalize_supplier_name,
+    _parse_table_result,
+    verify_calculations,
 )
 
 
-def test_merge_image_table_results_prefers_vision_total_when_azure_total_disagrees_with_item_sum():
-    azure_items = [
-        Stage2Item(item=13, valor_total=1000.00),
-        Stage2Item(item=14, valor_total=500.00),
+def test_verify_calculations_flags_divergence_when_quantity_times_unit_price_differs_from_total():
+    items = [
+        Stage2Item(item=1, quantidade=10.0, valor_unitario=5.00, valor_total=50.00),
+        Stage2Item(item=2, quantidade=3.0, valor_unitario=25.00, valor_total=80.00),  # Erro: 3 * 25 = 75 != 80
     ]
-    azure_data = {
-        "items": azure_items,
-        "fornecedor": None,
-        "cnpj": "11.111.111/0001-11",
-        "valor_total_geral": 1200.00,
-    }
-    vision_data = {
-        "items": [],
-        "fornecedor": "Fornecedor Vision",
-        "cnpj": None,
-        "valor_total_geral": 1500.00,
-    }
 
-    items, fornecedor, cnpj, total = _merge_image_table_results(azure_data, vision_data)
+    verif = verify_calculations(items, valor_total_documento=130.00)
 
-    assert [item.item for item in items] == [13, 14]
-    assert fornecedor == "FORNECEDOR VISION"
-    assert cnpj == "11.111.111/0001-11"
-    assert total == 1500.0
+    assert verif.correto is False
+    assert len(verif.divergencias) == 1
+    assert verif.divergencias[0].tipo == "item"
+    assert verif.divergencias[0].item == 2
+    assert verif.divergencias[0].esperado == 75.00
+    assert verif.divergencias[0].encontrado == 80.00
 
 
-def test_merge_image_table_results_keeps_azure_itemization_and_prefers_matching_azure_total():
-    azure_items = [
-        Stage2Item(item=1, valor_total=400.00),
-        Stage2Item(item=2, valor_total=600.00),
+def test_verify_calculations_passes_when_all_items_math_is_accurate():
+    items = [
+        Stage2Item(item=1, quantidade=100.0, valor_unitario=2.50, valor_total=250.00),
+        Stage2Item(item=2, quantidade=20.0, valor_unitario=28.00, valor_total=560.00),
     ]
-    azure_data = {
-        "items": azure_items,
-        "fornecedor": "Fornecedor Azure",
-        "cnpj": "22.222.222/0001-22",
-        "valor_total_geral": 1000.00,
-    }
-    vision_data = {
-        "items": [Stage2Item(item=9, valor_total=999.00)],
-        "fornecedor": "Fornecedor Vision",
-        "cnpj": "33.333.333/0001-33",
-        "valor_total_geral": 999.00,
-    }
 
-    items, fornecedor, cnpj, total = _merge_image_table_results(azure_data, vision_data)
+    verif = verify_calculations(items, valor_total_documento=810.00)
 
-    assert [item.item for item in items] == [1, 2]
-    assert fornecedor == "FORNECEDOR VISION"
-    assert cnpj == "33.333.333/0001-33"
-    assert total == 1000.0
+    assert verif.correto is True
+    assert len(verif.divergencias) == 0
+    assert verif.valor_total_calculado == 810.00
 
 
-def test_merge_image_table_results_preserves_explicit_azure_header_supplier_over_vision_inference():
-    azure_data = {
-        "items": [Stage2Item(item=13, valor_total=500.00)],
-        "fornecedor": "COOPERATIVA AGRÍCOLA DE CAMPO GRANDE",
-        "fornecedor_source": "header_tsv",
+def test_parse_table_result_parses_gemini_vision_output():
+    vision_raw = {
+        "fornecedor": "PAPELARIA E COPIADORA MILITAR LTDA",
         "cnpj": "15.571.482/0001-07",
-        "valor_total_geral": 500.00,
-    }
-    vision_data = {
-        "items": [],
-        "fornecedor": "EMPÓRIO HORTIFRUTI DE CAMPO GRANDE",
-        "cnpj": "15.571.482/0001-07",
-        "valor_total_geral": 500.00,
+        "valor_total_geral": 250.00,
+        "itens": [
+            {
+                "item": 1,
+                "catmat": "150234",
+                "descricao": "Caneta esferográfica azul",
+                "unidade": "UND",
+                "quantidade": 100.0,
+                "valor_unitario": 2.50,
+                "valor_total": 250.00,
+                "nd_subelemento": "33.90.30.24",
+            }
+        ],
     }
 
-    items, fornecedor, cnpj, total = _merge_image_table_results(azure_data, vision_data)
+    items, fornecedor, cnpj, total = _parse_table_result(vision_raw)
 
-    assert [item.item for item in items] == [13]
-    assert fornecedor == "COOPERATIVA AGRÍCOLA DE CAMPO GRANDE"
+    assert len(items) == 1
+    assert items[0].item == 1
+    assert items[0].catmat == "150234"
+    assert items[0].quantidade == 100.0
+    assert items[0].valor_unitario == 2.50
+    assert items[0].valor_total == 250.00
+    assert fornecedor == "PAPELARIA E COPIADORA MILITAR LTDA"
     assert cnpj == "15.571.482/0001-07"
-    assert total == 500.0
+    assert float(total) == 250.00
 
 
 def test_normalize_supplier_name_prefers_razao_social_and_uppercases():
