@@ -22,6 +22,22 @@ def test_verify_calculations_flags_divergence_when_quantity_times_unit_price_dif
     assert verif.divergencias[0].encontrado == 80.00
 
 
+def test_verify_calculations_flags_exact_one_cent_divergence():
+    # 10 * 10.00 = 100.00, mas documento informou 100.01 (divergência exata de 1 centavo)
+    items = [
+        Stage2Item(item=1, quantidade=10.0, valor_unitario=10.00, valor_total=100.01),
+    ]
+
+    verif = verify_calculations(items, valor_total_documento=100.01)
+
+    assert verif.correto is False
+    assert len(verif.divergencias) == 1
+    assert verif.divergencias[0].tipo == "item"
+    assert verif.divergencias[0].item == 1
+    assert verif.divergencias[0].esperado == 100.00
+    assert verif.divergencias[0].encontrado == 100.01
+
+
 def test_verify_calculations_passes_when_all_items_math_is_accurate():
     items = [
         Stage2Item(item=1, quantidade=100.0, valor_unitario=2.50, valor_total=250.00),

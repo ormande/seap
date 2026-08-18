@@ -3330,8 +3330,8 @@ def verify_calculations(
     valor_total_documento: Optional[float],
 ) -> Stage2VerificacaoCalculos:
     """
-    Verificação matemática pura (sem IA):
-    - Confere se QTD × V.UNT == V.TOTAL por item (com tolerância de R$0,02).
+    Verificação matemática com exatidão absoluta (sem tolerância):
+    - Confere se QTD × V.UNT == V.TOTAL por item (qualquer divergência de centavos é apontada).
     - Confere se soma dos V.TOTAL == valor total da requisição (quando informado).
     """
     divergencias: List[Stage2Divergencia] = []
@@ -3345,32 +3345,34 @@ def verify_calculations(
             continue
 
         expected = (q * vu).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        diff = abs(expected - vt)
-        if diff > Decimal("0.02"):
+        vt_rounded = vt.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if expected != vt_rounded:
             divergencias.append(
                 Stage2Divergencia(
                     tipo="item",
                     item=item.item,
                     esperado=float(expected),
-                    encontrado=float(vt),
+                    encontrado=float(vt_rounded),
                 )
             )
 
-        total_calc += vt
+        total_calc += vt_rounded
 
-    vt_doc_dec = _safe_decimal(valor_total_documento) if valor_total_documento is not None else total_calc
+    vt_doc_dec = (
+        _safe_decimal(valor_total_documento).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if valor_total_documento is not None
+        else total_calc
+    )
 
-    if vt_doc_dec is not None:
-        diff_total = abs(total_calc - vt_doc_dec)
-        if diff_total > Decimal("0.02"):
-            divergencias.append(
-                Stage2Divergencia(
-                    tipo="total",
-                    item=None,
-                    esperado=float(total_calc),
-                    encontrado=float(vt_doc_dec),
-                )
+    if vt_doc_dec is not None and total_calc != vt_doc_dec:
+        divergencias.append(
+            Stage2Divergencia(
+                tipo="total",
+                item=None,
+                esperado=float(total_calc),
+                encontrado=float(vt_doc_dec),
             )
+        )
 
     correto = len(divergencias) == 0
 
