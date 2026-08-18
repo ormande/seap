@@ -172,9 +172,9 @@ def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
                     delay,
                 )
                 time.sleep(delay)
-            else:
-                raise
-    raise last_error
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Número máximo de tentativas excedido.")
 
 
 class GeminiProcessor:
