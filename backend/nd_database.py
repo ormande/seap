@@ -10,24 +10,23 @@ Fonte de verdade:
 
 from json import loads
 from pathlib import Path
-from typing import Any, Dict
-
+from typing import Any
 
 _OFFICIAL_JSON_PATH = Path(__file__).with_name("nd_official_mar26.json")
 
 
-def _load_official_nd_table() -> Dict[str, Dict[str, Any]]:
+def _load_official_nd_table() -> dict[str, dict[str, Any]]:
     raw = loads(_OFFICIAL_JSON_PATH.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("Tabela oficial de ND inválida: raiz não é objeto JSON.")
     return raw
 
 
-ND_CLASSES: Dict[str, Dict[str, Any]] = _load_official_nd_table()
+ND_CLASSES: dict[str, dict[str, Any]] = _load_official_nd_table()
 
 
 # Camada semântica usada pelo Stage 3 para contextualizar Material/Serviço/Equipamento.
-_ELEMENT_SEMANTICS: Dict[str, Dict[str, Any]] = {
+_ELEMENT_SEMANTICS: dict[str, dict[str, Any]] = {
     "30": {
         "nome": "Material de Consumo",
         "tipo": "material",
@@ -81,8 +80,8 @@ def _title_case_ascii(value: str) -> str:
     return " ".join(part.capitalize() for part in (value or "").strip().split())
 
 
-def _build_nd_elements() -> Dict[str, Dict[str, Any]]:
-    elements: Dict[str, Dict[str, Any]] = {}
+def _build_nd_elements() -> dict[str, dict[str, Any]]:
+    elements: dict[str, dict[str, Any]] = {}
 
     for nd_code, info in ND_CLASSES.items():
         if not isinstance(info, dict) or len(nd_code) < 2:
@@ -107,4 +106,4 @@ def _build_nd_elements() -> Dict[str, Dict[str, Any]]:
     return elements
 
 
-ND_ELEMENTS: Dict[str, Dict[str, Any]] = _build_nd_elements()
+ND_ELEMENTS: dict[str, dict[str, Any]] = _build_nd_elements()

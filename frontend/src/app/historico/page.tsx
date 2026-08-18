@@ -9,7 +9,6 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { History, Search, Trash2 } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -131,7 +130,6 @@ export default function HistoricoPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [selectedForDelete, setSelectedForDelete] =
     useState<AnalysisSummary | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -296,11 +294,7 @@ export default function HistoricoPage() {
           setSelectedForDelete(null);
           try {
             await deleteAnalysis(id);
-            setDeletingId(id);
-            setTimeout(() => {
-              setList((prev) => prev.filter((item) => item.id !== id));
-              setDeletingId(null);
-            }, 200);
+            setList((prev) => prev.filter((item) => item.id !== id));
             setToast('Análise excluída');
             setTimeout(() => setToast(null), 2500);
           } catch (e) {

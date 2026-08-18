@@ -6,13 +6,11 @@ o nome da OM a partir do código.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 # Cache: codigo (str) -> nome (str). Preenchido no startup e ao adicionar UASG.
-_UASG_CACHE: Dict[str, str] = {}
+_UASG_CACHE: dict[str, str] = {}
 
 
-def get_uasg_nome(codigo: Optional[str]) -> Optional[str]:
+def get_uasg_nome(codigo: str | None) -> str | None:
     """Retorna o nome da OM para o código UASG, ou None se não estiver no banco."""
     if not codigo or not isinstance(codigo, str):
         return None
@@ -26,7 +24,7 @@ def set_uasg_in_cache(codigo: str, nome: str) -> None:
         _UASG_CACHE[codigo] = (nome or "").strip()
 
 
-def load_uasg_cache_from_dict(mapping: Dict[str, str]) -> None:
+def load_uasg_cache_from_dict(mapping: dict[str, str]) -> None:
     """Preenche o cache a partir de um dicionário (ex.: resultado do banco)."""
     _UASG_CACHE.clear()
     for codigo, nome in (mapping or {}).items():
@@ -34,6 +32,6 @@ def load_uasg_cache_from_dict(mapping: Dict[str, str]) -> None:
             _UASG_CACHE[codigo.strip()] = (nome or "").strip()
 
 
-def get_uasg_cache_snapshot() -> Dict[str, str]:
+def get_uasg_cache_snapshot() -> dict[str, str]:
     """Retorna cópia do cache (para debug ou listagem)."""
     return dict(_UASG_CACHE)

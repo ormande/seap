@@ -6,8 +6,8 @@ from backend.analyze_payloads import (
 )
 from backend.models import (
     AnalyzeMetadata,
-    AnalyzeStages,
     AnalyzeResponse,
+    AnalyzeStages,
     Stage1Confidence,
     Stage1Data,
     Stage1OM,

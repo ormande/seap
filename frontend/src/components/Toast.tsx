@@ -19,8 +19,6 @@ export const Toast: React.FC<ToastProps> = ({
   useEffect(() => {
     if (!message) return;
 
-    setExiting(false);
-
     const exitTimer = setTimeout(() => {
       setExiting(true);
     }, Math.max(0, durationMs - 200));

@@ -9,9 +9,10 @@ Camadas:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -134,7 +135,7 @@ def _clean_om_candidate(text: str) -> str:
     return cleaned
 
 
-def _match_known_om(nome: str) -> Dict[str, Any]:
+def _match_known_om(nome: str) -> dict[str, Any]:
     """
     Faz matching do nome da OM contra a lista fixa.
     Tenta por extenso e por sigla usando substring case-insensitive.
@@ -176,7 +177,7 @@ def _match_known_om(nome: str) -> Dict[str, Any]:
     }
 
 
-def _build_om_field(raw_om: Any) -> Optional[Dict[str, Any]]:
+def _build_om_field(raw_om: Any) -> dict[str, Any] | None:
     """
     Constrói o objeto OM padronizado a partir de um valor bruto (string ou dict).
     """
@@ -195,7 +196,7 @@ def _build_om_field(raw_om: Any) -> Optional[Dict[str, Any]]:
     return _match_known_om(cleaned)
 
 
-def _extract_nup(page_text: str) -> Optional[str]:
+def _extract_nup(page_text: str) -> str | None:
     lines = page_text.splitlines()
     for idx, line in enumerate(lines):
         upper = line.upper()
@@ -215,7 +216,7 @@ def _extract_nup(page_text: str) -> Optional[str]:
     return None
 
 
-def _extract_requisicao(page_text: str) -> Optional[Dict[str, Any]]:
+def _extract_requisicao(page_text: str) -> dict[str, Any] | None:
     lines = page_text.splitlines()
     snippet = ""
     for line in lines:
@@ -233,7 +234,7 @@ def _extract_requisicao(page_text: str) -> Optional[Dict[str, Any]]:
         numero = int(numero_str)
     except (TypeError, ValueError):
         numero = None
-    ano: Optional[int] = None
+    ano: int | None = None
     if ano_str:
         try:
             ano_val = int(ano_str)
@@ -249,7 +250,7 @@ def _extract_requisicao(page_text: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def _extract_om_raw(page_text: str) -> Optional[str]:
+def _extract_om_raw(page_text: str) -> str | None:
     """
     Extrai o texto bruto logo após "Órgão de Origem:" podendo incluir
     parte da linha seguinte. A limpeza e validação ficam em _build_om_field.
@@ -281,7 +282,7 @@ def _extract_om_raw(page_text: str) -> Optional[str]:
     return None
 
 
-def extract_with_regex(page_text: str) -> Dict[str, Any]:
+def extract_with_regex(page_text: str) -> dict[str, Any]:
     """
     Primeira camada: tenta extrair NUP, Requisição e OM apenas com regex.
     """
@@ -297,7 +298,7 @@ def extract_with_regex(page_text: str) -> Dict[str, Any]:
     }
 
 
-def extract_with_ai(page_text: str, processor: Optional[GeminiProcessor] = None) -> Dict[str, Any]:
+def extract_with_ai(page_text: str, processor: GeminiProcessor | None = None) -> dict[str, Any]:
     """
     Fallback com IA (Gemini) quando a regex não encontra todos os campos.
     """
@@ -316,7 +317,7 @@ def extract_with_ai(page_text: str, processor: Optional[GeminiProcessor] = None)
     return result
 
 
-def _compute_confidence_for_fields(extracted: Dict[str, Any], original_text: str) -> Dict[str, int]:
+def _compute_confidence_for_fields(extracted: dict[str, Any], original_text: str) -> dict[str, int]:
     nup = (extracted.get("nup") or "") if isinstance(extracted, dict) else ""
     requisicao = extracted.get("requisicao") or {}
     om = extracted.get("om") or None
@@ -366,7 +367,7 @@ def _compute_confidence_for_fields(extracted: Dict[str, Any], original_text: str
 
     fields = [nup_conf, req_conf, om_conf]
     valid = [v for v in fields if v > 0]
-    geral = int(round(sum(valid) / len(valid))) if valid else 0
+    geral = round(sum(valid) / len(valid)) if valid else 0
 
     return {
         "nup": max(0, min(100, nup_conf)),
@@ -377,11 +378,11 @@ def _compute_confidence_for_fields(extracted: Dict[str, Any], original_text: str
 
 
 def verify_extraction(
-    extracted: Dict[str, Any],
+    extracted: dict[str, Any],
     original_text: str,
     method: str,
-    processor: Optional[GeminiProcessor] = None,
-) -> Dict[str, int]:
+    processor: GeminiProcessor | None = None,
+) -> dict[str, int]:
     """
     Verifica a extração, sempre retornando scores numéricos por campo e geral.
     Usa IA de verificação apenas quando necessário (baixa confiança).
@@ -408,7 +409,7 @@ def verify_extraction(
         json_extraido = json.dumps(extracted, ensure_ascii=False)
         verification = proc.verify_extraction(original_text, json_extraido)
         score = float(verification.get("score_confianca", 0.0))
-        geral_ai = int(round(max(0.0, min(1.0, score)) * 100))
+        geral_ai = round(max(0.0, min(1.0, score)) * 100)
         base_scores["geral"] = geral_ai
     except Exception as exc:  # noqa: BLE001
         logger.warning("Falha ao verificar extração do estágio 1 com IA: %s", exc)
@@ -416,11 +417,11 @@ def verify_extraction(
     return base_scores
 
 
-def _merge_regex_and_ai(regex_data: Dict[str, Any], ai_data: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_regex_and_ai(regex_data: dict[str, Any], ai_data: dict[str, Any]) -> dict[str, Any]:
     """
     Mescla resultados de regex e IA, priorizando o que já estiver bem definido.
     """
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
 
     merged["nup"] = regex_data.get("nup") or ai_data.get("nup")
 
@@ -446,7 +447,7 @@ def _merge_regex_and_ai(regex_data: Dict[str, Any], ai_data: Dict[str, Any]) -> 
     return merged
 
 
-def run(page_text: str) -> Dict[str, Any]:
+def run(page_text: str) -> dict[str, Any]:
     """
     Executa o Estágio 1 para o texto da primeira página.
     """
@@ -464,7 +465,7 @@ def run(page_text: str) -> Dict[str, Any]:
     )
 
     used_ai = False
-    final_data: Dict[str, Any] = regex_result
+    final_data: dict[str, Any] = regex_result
     method = "regex"
 
     if not has_all_regex:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 try:
     from .models import AnalyzeResponse, AnalyzeSummary
@@ -37,12 +37,12 @@ SUMMARY_EXCLUDE = {
 }
 
 
-def build_analyze_full_payload(analyze_response: AnalyzeResponse) -> Dict[str, Any]:
+def build_analyze_full_payload(analyze_response: AnalyzeResponse) -> dict[str, Any]:
     """Serializa o resultado completo com texto bruto e trilhas diagnósticas."""
     return analyze_response.model_dump(mode="json")
 
 
-def build_analyze_summary_payload(analyze_response: AnalyzeResponse) -> Dict[str, Any]:
+def build_analyze_summary_payload(analyze_response: AnalyzeResponse) -> dict[str, Any]:
     """
     Serializa uma versão enxuta para UI/download padrão.
 

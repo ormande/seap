@@ -12,16 +12,17 @@ const handler = NextAuth({
     async jwt({ token, account }) {
       // Propaga accessToken do Google para uso posterior (ex.: chamadas ao backend)
       if (account && account.access_token) {
-        (token as any).accessToken = account.access_token;
+        ((token as unknown) as Record<string, unknown>).accessToken = account.access_token;
       }
       return token;
     },
     async session({ session, token }) {
       // Adicionar user ID e accessToken à sessão
       if (session.user) {
-        (session.user as any).id = token.sub;
+        ((session.user as unknown) as Record<string, unknown>).id = token.sub;
       }
-      (session as any).accessToken = (token as any).accessToken ?? null;
+      ((session as unknown) as Record<string, unknown>).accessToken =
+        ((token as unknown) as Record<string, unknown>).accessToken ?? null;
       return session;
     },
   },

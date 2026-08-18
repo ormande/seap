@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -42,7 +42,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _format_brl(value: Optional[float]) -> str:
+def _format_brl(value: float | None) -> str:
     """Formata número em reais no padrão brasileiro (R$ X.XXX,YY)."""
     if value is None:
         return "-"
@@ -56,12 +56,12 @@ def _format_brl(value: Optional[float]) -> str:
 
 
 def collect_issues(
-    stage1: Optional[Stage1Result],
-    stage2: Optional[Stage2Result],
-    stage3: Optional[Stage3Result],
-    stage4: Optional[Stage4Result],
-    stage5: Optional[Stage5Result],
-) -> Dict[str, Any]:
+    stage1: Stage1Result | None,
+    stage2: Stage2Result | None,
+    stage3: Stage3Result | None,
+    stage4: Stage4Result | None,
+    stage5: Stage5Result | None,
+) -> dict[str, Any]:
     """
     Percorre resultados de todos os estágios e coleta:
     - reprovacoes: lista de problemas graves.
@@ -69,10 +69,10 @@ def collect_issues(
     - pendencias_despachos: pendências do Estágio 5 (informativas).
     - pontos_positivos: aspectos que estão OK.
     """
-    reprovacoes: List[Stage6Issue] = []
-    ressalvas: List[Stage6Issue] = []
-    pendencias_despachos: List[Stage6Issue] = []
-    pontos_positivos: List[str] = []
+    reprovacoes: list[Stage6Issue] = []
+    ressalvas: list[Stage6Issue] = []
+    pendencias_despachos: list[Stage6Issue] = []
+    pontos_positivos: list[str] = []
 
     # --- Estágio 2: cálculos e campos principais ---
     if stage2 and stage2.data:
@@ -155,7 +155,7 @@ def collect_issues(
                         nd_req = getattr(inc, "nd_req", None)
                         justificativa = getattr(inc, "justificativa", None)
 
-                        detalhes_parts: List[str] = []
+                        detalhes_parts: list[str] = []
                         if descricao_item:
                             detalhes_parts.append(f"Item: {descricao_item}.")
                         if classificacao_label:
@@ -300,7 +300,7 @@ def collect_issues(
     }
 
 
-def determine_verdict(issues: Dict[str, Any]) -> str:
+def determine_verdict(issues: dict[str, Any]) -> str:
     """
     Determina o veredicto final a partir das listas de problemas.
     - Se há reprovacoes → "reprovado"
@@ -394,8 +394,8 @@ requisição."
 
 def generate_dispatch(
     verdict: str,
-    issues: Dict[str, Any],
-    stages_data: Dict[str, Any],
+    issues: dict[str, Any],
+    stages_data: dict[str, Any],
 ) -> str:
     """
     Usa Gemini para gerar o texto do despacho conforme o veredicto.
@@ -406,8 +406,8 @@ def generate_dispatch(
         # Nenhum despacho é necessário em caso de aprovação integral.
         return ""
 
-    stage1: Optional[Stage1Result] = stages_data.get("stage1")
-    stage2: Optional[Stage2Result] = stages_data.get("stage2")
+    stage1: Stage1Result | None = stages_data.get("stage1")
+    stage2: Stage2Result | None = stages_data.get("stage2")
 
     # Dados principais do processo para o prompt.
     nup = stage1.data.nup if stage1 and stage1.data else ""
@@ -434,12 +434,12 @@ def generate_dispatch(
         valor_str = _format_brl(d2.valor_total)
 
     # Monta listas de problemas e ressalvas em texto.
-    problemas_texto_parts: List[str] = []
+    problemas_texto_parts: list[str] = []
     for issue in issues.get("reprovacoes") or []:
         problemas_texto_parts.append(f"- [Estágio {issue.estagio}] {issue.descricao} {issue.detalhes or ''}".strip())
     lista_problemas = "\n".join(problemas_texto_parts) or "Nenhum problema impeditivo identificado."
 
-    ressalvas_texto_parts: List[str] = []
+    ressalvas_texto_parts: list[str] = []
     for issue in issues.get("ressalvas") or []:
         ressalvas_texto_parts.append(f"- [Estágio {issue.estagio}] {issue.descricao} {issue.detalhes or ''}".strip())
     lista_ressalvas = "\n".join(ressalvas_texto_parts) or "Nenhuma ressalva relevante identificada."
@@ -494,7 +494,7 @@ def generate_dispatch(
         # Normalização final: remover marcadores de lista no início das linhas
         # (alíneas, numeração, bullets) e juntar tudo em um único parágrafo.
         raw_lines = [ln for ln in text.splitlines()]
-        cleaned_lines: List[str] = []
+        cleaned_lines: list[str] = []
         for ln in raw_lines:
             stripped = ln.lstrip()
             if not stripped:
@@ -516,7 +516,7 @@ def generate_dispatch(
         )
         if banned_pattern.search(text):
             sentences = re.split(r"(?<=[.!?])\s+", text)
-            filtered_sentences: List[str] = []
+            filtered_sentences: list[str] = []
             for sentence in sentences:
                 if not sentence.strip():
                     continue
@@ -549,7 +549,7 @@ def generate_dispatch(
         return ""
 
 
-def run(all_stages: Dict[str, Any]) -> Dict[str, Any]:
+def run(all_stages: dict[str, Any]) -> dict[str, Any]:
     """
     Executa o Estágio 6:
     - Coleta issues dos estágios 1–5.
@@ -557,11 +557,11 @@ def run(all_stages: Dict[str, Any]) -> Dict[str, Any]:
     - Opcionalmente gera um despacho sugerido.
     """
     nup_id = all_stages.get("nup_id", "")
-    stage1: Optional[Stage1Result] = all_stages.get("stage1")
-    stage2: Optional[Stage2Result] = all_stages.get("stage2")
-    stage3: Optional[Stage3Result] = all_stages.get("stage3")
-    stage4: Optional[Stage4Result] = all_stages.get("stage4")
-    stage5: Optional[Stage5Result] = all_stages.get("stage5")
+    stage1: Stage1Result | None = all_stages.get("stage1")
+    stage2: Stage2Result | None = all_stages.get("stage2")
+    stage3: Stage3Result | None = all_stages.get("stage3")
+    stage4: Stage4Result | None = all_stages.get("stage4")
+    stage5: Stage5Result | None = all_stages.get("stage5")
 
     issues = collect_issues(stage1, stage2, stage3, stage4, stage5)
     print(

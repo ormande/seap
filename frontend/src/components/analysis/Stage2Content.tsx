@@ -44,8 +44,7 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
   const [uasgNomeInput, setUasgNomeInput] = useState('');
   const [uasgAdding, setUasgAdding] = useState(false);
   const [uasgError, setUasgError] = useState<string | null>(null);
-
-  const items: Stage2Item[] = data?.itens ?? [];
+  const items: Stage2Item[] = useMemo(() => data?.itens ?? [], [data?.itens]);
   const divergencias: Stage2Divergencia[] =
     data?.verificacao_calculos?.divergencias ?? [];
   const ndVerification = data?.verificacao_nd ?? null;
@@ -369,7 +368,7 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
                         key={header.id}
                         className={[
                           'border-b border-[var(--border-subtle)] px-2 py-1 text-left text-[11px] font-semibold text-[var(--text-secondary)]',
-                          (header.column.columnDef.meta as any)?.align === 'right'
+                          (header.column.columnDef.meta as { align?: string } | undefined)?.align === 'right'
                             ? 'text-right'
                             : '',
                         ].join(' ')}
@@ -403,7 +402,7 @@ export const Stage2Content: React.FC<Stage2ContentProps> = ({
                         key={cell.id}
                         className={[
                           'border-b border-[var(--border-subtle)]/60 px-2 py-1 align-top text-[11px] text-[var(--text-primary)]',
-                          (cell.column.columnDef.meta as any)?.align === 'right'
+                          (cell.column.columnDef.meta as { align?: string } | undefined)?.align === 'right'
                             ? 'text-right'
                             : '',
                         ].join(' ')}

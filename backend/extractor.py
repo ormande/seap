@@ -1,11 +1,11 @@
 import base64
 import io
+import platform
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal
+from typing import Any, Literal
 
 import pdfplumber
-import platform
 
 try:
     from .models import AnchorConfig, AnchorPageResult
@@ -29,13 +29,13 @@ else:
 PageType = Literal["nativa", "escaneada"]
 
 
-def detect_image_pages(pdf_path: str | Path) -> List[int]:
+def detect_image_pages(pdf_path: str | Path) -> list[int]:
     """
     Retorna lista de páginas que são essencialmente imagens (pouco ou nenhum texto extraível).
     Critério: se o texto extraído tem menos de 100 caracteres (excluindo rodapé padrão),
     a página é provavelmente uma imagem.
     """
-    image_pages: List[int] = []
+    image_pages: list[int] = []
     pdf_path = Path(pdf_path)
     with pdfplumber.open(pdf_path) as pdf:
         for i, page in enumerate(pdf.pages):
@@ -62,7 +62,7 @@ def page_to_base64(pdf_path: str | Path, page_number: int) -> str:
     """
     pdf_path = Path(pdf_path)
     try:
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "first_page": page_number,
             "last_page": page_number,
             "dpi": 300,
@@ -159,17 +159,17 @@ def detect_page_type(page: pdfplumber.page.Page) -> PageType:
     return "escaneada"
 
 
-def _extract_tables_from_page(page: pdfplumber.page.Page) -> List[List[List[str]]]:
+def _extract_tables_from_page(page: pdfplumber.page.Page) -> list[list[list[str]]]:
     """
     Extrai tabelas de uma página usando pdfplumber e normaliza o conteúdo.
     """
     raw_tables = page.extract_tables() or []
-    normalized_tables: List[List[List[str]]] = []
+    normalized_tables: list[list[list[str]]] = []
 
     for table in raw_tables:
-        normalized_table: List[List[str]] = []
+        normalized_table: list[list[str]] = []
         for row in table:
-            normalized_row: List[str] = []
+            normalized_row: list[str] = []
             for cell in row:
                 if isinstance(cell, str):
                     normalized_row.append(cell.strip())
@@ -186,7 +186,7 @@ def _extract_tables_from_page(page: pdfplumber.page.Page) -> List[List[List[str]
 
 def extract_with_anchors(
     pdf_path: str | Path, anchors_config: AnchorConfig
-) -> Dict[str, List[AnchorPageResult]]:
+) -> dict[str, list[AnchorPageResult]]:
     """
     Percorre as páginas do PDF, detecta pontos âncora no texto e
     extrai apenas as páginas relevantes.
@@ -195,11 +195,11 @@ def extract_with_anchors(
     if not pdf_path.is_file():
         raise FileNotFoundError(f"PDF não encontrado em: {pdf_path}")
 
-    results: Dict[str, List[AnchorPageResult]] = {
-        key: [] for key in anchors_config.anchors.keys()
+    results: dict[str, list[AnchorPageResult]] = {
+        key: [] for key in anchors_config.anchors
     }
 
-    normalized_anchors: Dict[str, List[str]] = {
+    normalized_anchors: dict[str, list[str]] = {
         anchor_type: [pattern.lower() for pattern in patterns]
         for anchor_type, patterns in anchors_config.anchors.items()
     }
@@ -232,7 +232,7 @@ def extract_with_anchors(
     return results
 
 
-def extract_all_pages(pdf_path: str | Path) -> Dict[str, Any]:
+def extract_all_pages(pdf_path: str | Path) -> dict[str, Any]:
     """
     Extrai texto de todas as páginas do PDF em uma única passada.
 
@@ -253,9 +253,9 @@ def extract_all_pages(pdf_path: str | Path) -> Dict[str, Any]:
     if not pdf_path.is_file():
         raise FileNotFoundError(f"PDF não encontrado em: {pdf_path}")
 
-    pages: Dict[str, str] = {}
+    pages: dict[str, str] = {}
     paginas_com_texto = 0
-    paginas_escaneadas: List[int] = []
+    paginas_escaneadas: list[int] = []
 
     with pdfplumber.open(pdf_path) as pdf:
         total_paginas = len(pdf.pages)
@@ -272,7 +272,7 @@ def extract_all_pages(pdf_path: str | Path) -> Dict[str, Any]:
 
     image_pages = detect_image_pages(pdf_path)
 
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "total_paginas": total_paginas,
         "paginas_com_texto": paginas_com_texto,
         "paginas_sem_texto": max(total_paginas - paginas_com_texto, 0),

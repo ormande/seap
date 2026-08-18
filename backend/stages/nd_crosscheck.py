@@ -14,9 +14,9 @@ Fluxo:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
-
 import logging
+from collections.abc import Sequence
+from typing import Any
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -27,15 +27,15 @@ try:
     from ..models import (
         Stage2Item,
         Stage3Destination,
-        Stage3NDCrossItem,
         Stage3NDCrosscheck,
+        Stage3NDCrossItem,
     )
 except ImportError:  # pragma: no cover
     from models import (
         Stage2Item,
         Stage3Destination,
-        Stage3NDCrossItem,
         Stage3NDCrosscheck,
+        Stage3NDCrossItem,
     )
 
 try:
@@ -47,7 +47,7 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
-def get_element(nd: Optional[str]) -> Optional[str]:
+def get_element(nd: str | None) -> str | None:
     """
     Extrai o elemento (2 dígitos) a partir de uma ND.
 
@@ -132,7 +132,7 @@ def quick_classify(descricao: str) -> str:
     return "30"
 
 
-def _element_label(element: Optional[str]) -> Optional[str]:
+def _element_label(element: str | None) -> str | None:
     """Retorna rótulo amigável (Material, Serviço, Equipamento) para um elemento."""
     if not element:
         return None
@@ -153,9 +153,9 @@ def _element_label(element: Optional[str]) -> Optional[str]:
 
 
 def _build_fallback_item(
-    item: Union[Stage2Item, Dict[str, Any]],
-    nc_nd: Optional[str],
-    nd_req_value: Optional[str],
+    item: Stage2Item | dict[str, Any],
+    nc_nd: str | None,
+    nd_req_value: str | None,
     quick_element: str,
 ) -> Stage3NDCrossItem:
     """
@@ -187,7 +187,7 @@ def _build_fallback_item(
     nd_req_compativel = req_element == quick_element if req_element else None
 
     # Considera compatível apenas se nenhuma das duas for explicitamente incompatível.
-    compativel: Optional[bool]
+    compativel: bool | None
     if nd_nc_compativel is False or nd_req_compativel is False:
         compativel = False
     elif nd_nc_compativel is None and nd_req_compativel is None:
@@ -255,9 +255,9 @@ Retorne APENAS JSON:
 
 
 async def classify_item_nd(
-    item: Union[Stage2Item, Dict[str, Any]],
-    nc_nd: Optional[str],
-    nd_req_value: Optional[str],
+    item: Stage2Item | dict[str, Any],
+    nc_nd: str | None,
+    nd_req_value: str | None,
 ) -> Stage3NDCrossItem:
     """
     Usa Gemini para classificação detalhada ND × Item.
@@ -336,7 +336,7 @@ async def classify_item_nd(
 
     nome_subelemento = result.get("nome_subelemento")
 
-    def _as_bool(value: Any) -> Optional[bool]:
+    def _as_bool(value: Any) -> bool | None:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -388,9 +388,9 @@ async def classify_item_nd(
 
 
 async def cross_check_nd_items(
-    nc_destinos: Sequence[Union[Stage3Destination, Dict[str, Any]]],
-    items: Sequence[Union[Stage2Item, Dict[str, Any]]],
-    nd_req: Optional[str] = None,
+    nc_destinos: Sequence[Stage3Destination | dict[str, Any]],
+    items: Sequence[Stage2Item | dict[str, Any]],
+    nd_req: str | None = None,
 ) -> Stage3NDCrosscheck:
     """
     Cruza ND da NC com os itens da requisição.
@@ -401,16 +401,16 @@ async def cross_check_nd_items(
     - nd_req: ND agregada da requisição (opcional). Quando não informada,
       usa‑se a ND/SI por item (nd_si / nd_si_original).
     """
-    resultados: List[Stage3NDCrossItem] = []
+    resultados: list[Stage3NDCrossItem] = []
 
     if not nc_destinos or not items:
         return Stage3NDCrosscheck(cruzamentos=[], todos_compativeis=True, inconsistencias=[])
 
     # Agrupar NDs únicas da NC.
-    nc_nds: List[str] = []
+    nc_nds: list[str] = []
     seen: set[str] = set()
     for dest in nc_destinos:
-        nd_value: Optional[str]
+        nd_value: str | None
         if isinstance(dest, dict):
             nd_value = dest.get("nd")
         else:

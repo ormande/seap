@@ -8,19 +8,20 @@ from __future__ import annotations
 
 import json
 import logging
+
 logger = logging.getLogger(__name__)
 import os
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import asyncpg  # type: ignore[import-untyped]
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-pool: Optional[asyncpg.Pool] = None
+pool: asyncpg.Pool | None = None
 
 # UASGs da 9ª RM para seed inicial (código -> nome).
-UASG_SEED_9RM: Dict[str, str] = {
+UASG_SEED_9RM: dict[str, str] = {
     "160078": "Colégio Militar de Campo Grande",
     "160095": "58º Batalhão de Infantaria Motorizado",
     "160131": "17º Regimento de Cavalaria Mecanizado",
@@ -136,11 +137,11 @@ async def close_db() -> None:
 
 
 
-def _extract_summary(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_summary(dados_completos: dict[str, Any]) -> dict[str, Any]:
     """
     Extrai campos resumidos dos estágios para popular as colunas da tabela analyses.
     """
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "nup": None,
         "requisicao": None,
         "om": None,
@@ -199,7 +200,7 @@ def _extract_summary(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-async def get_or_create_user(user_id: str, email: str, name: str) -> Dict[str, Any]:
+async def get_or_create_user(user_id: str, email: str, name: str) -> dict[str, Any]:
     """Busca ou cria usuário a partir do id (sub do Google)."""
     if pool is None:
         raise RuntimeError("Pool de conexões não inicializado.")
@@ -219,9 +220,9 @@ async def get_or_create_user(user_id: str, email: str, name: str) -> Dict[str, A
 
 async def save_analysis(
     user_id: str,
-    dados_completos: Dict[str, Any],
+    dados_completos: dict[str, Any],
     tempo_analise_sec: int = 0,
-    data_analise_iso: Optional[str] = None,
+    data_analise_iso: str | None = None,
 ) -> str:
     """
     Salva uma análise associada ao usuário.
@@ -289,7 +290,7 @@ async def save_analysis(
     return analysis_id
 
 
-async def get_user_analyses(user_id: str) -> List[Dict[str, Any]]:
+async def get_user_analyses(user_id: str) -> list[dict[str, Any]]:
     """Retorna o histórico de análises de um usuário (sem dados_completos)."""
     if pool is None:
         raise RuntimeError("Pool de conexões não inicializado.")
@@ -324,7 +325,7 @@ async def get_user_analyses(user_id: str) -> List[Dict[str, Any]]:
         return [dict(r) for r in rows]
 
 
-async def get_analysis(analysis_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+async def get_analysis(analysis_id: str, user_id: str) -> dict[str, Any] | None:
     """Retorna uma análise completa (com dados_completos) se pertencer ao usuário."""
     if pool is None:
         raise RuntimeError("Pool de conexões não inicializado.")
@@ -367,7 +368,7 @@ async def delete_analysis(analysis_id: str, user_id: str) -> bool:
         return result.upper().startswith("DELETE 1")
 
 
-async def get_all_uasgs() -> List[Dict[str, Any]]:
+async def get_all_uasgs() -> list[dict[str, Any]]:
     """Retorna todas as UASGs (codigo, nome) para popular o cache."""
     if pool is None:
         raise RuntimeError("Pool de conexões não inicializado.")

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class AnchorConfig(BaseModel):
     """Configuração dos pontos âncora usados na extração."""
 
-    anchors: Dict[str, List[str]] = Field(
+    anchors: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "cabecalho": [
                 "processo nº",
@@ -44,7 +44,7 @@ class AnchorPageResult(BaseModel):
 
     page_number: int = Field(..., description="Número da página (1-based) no PDF.")
     text: str = Field(..., description="Texto completo extraído da página.")
-    tables: List[List[List[str]]] = Field(
+    tables: list[list[list[str]]] = Field(
         default_factory=list,
         description=(
             "Lista de tabelas detectadas na página. "
@@ -65,7 +65,7 @@ class ExtractionResult(BaseModel):
     anchor_config: AnchorConfig = Field(
         ..., description="Configuração de âncoras utilizada na extração."
     )
-    results: Dict[str, List[AnchorPageResult]] = Field(
+    results: dict[str, list[AnchorPageResult]] = Field(
         default_factory=dict,
         description=(
             "Dados extraídos organizados por tipo de âncora. "
@@ -93,7 +93,7 @@ class VerificationResult(BaseModel):
         le=1,
         description="Score de confiança entre 0 e 1 (1 = total aderência).",
     )
-    correcoes: List[CorreçãoItem] = Field(
+    correcoes: list[CorreçãoItem] = Field(
         default_factory=list,
         description="Lista de correções sugeridas.",
     )
@@ -104,7 +104,7 @@ class FullExtractionResult(BaseModel):
 
     processed_pages: int = Field(..., description="Total de páginas processadas.")
     ignored_pages: int = Field(..., description="Páginas ignoradas (sem âncoras).")
-    dados: Dict[str, Any] = Field(
+    dados: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Dados estruturados por tipo: cabecalho, itens, despacho, fornecedor. "
@@ -127,7 +127,7 @@ class AnalyzeMetadata(BaseModel):
     paginas_sem_texto: int = Field(
         ..., description="Total de páginas sem texto extraível."
     )
-    paginas_escaneadas: List[int] = Field(
+    paginas_escaneadas: list[int] = Field(
         default_factory=list,
         description="Lista de páginas provavelmente escaneadas (imagem).",
     )
@@ -136,13 +136,13 @@ class AnalyzeMetadata(BaseModel):
 class Stage1Requisicao(BaseModel):
     """Informações estruturadas da requisição na capa."""
 
-    numero: Optional[int] = Field(
+    numero: int | None = Field(
         default=None, description="Número da requisição, se identificado."
     )
-    ano: Optional[int] = Field(
+    ano: int | None = Field(
         default=None, description="Ano da requisição, se identificado."
     )
-    texto_original: Optional[str] = Field(
+    texto_original: str | None = Field(
         default=None, description="Trecho original encontrado no PDF."
     )
 
@@ -150,10 +150,10 @@ class Stage1Requisicao(BaseModel):
 class Stage1OM(BaseModel):
     """Informações da Organização Militar (Órgão de Origem) no estágio 1."""
 
-    nome: Optional[str] = Field(
+    nome: str | None = Field(
         default=None, description="Nome por extenso padronizado da OM."
     )
-    sigla: Optional[str] = Field(
+    sigla: str | None = Field(
         default=None, description="Sigla da OM, se reconhecida na lista fixa."
     )
     validada: bool = Field(
@@ -171,11 +171,11 @@ class Stage1OM(BaseModel):
 class Stage1Data(BaseModel):
     """Campos extraídos no estágio 1 (identificação)."""
 
-    nup: Optional[str] = Field(default=None, description="Número Único de Protocolo.")
-    requisicao: Optional[Stage1Requisicao] = Field(
+    nup: str | None = Field(default=None, description="Número Único de Protocolo.")
+    requisicao: Stage1Requisicao | None = Field(
         default=None, description="Dados da requisição."
     )
-    om: Optional[Stage1OM] = Field(
+    om: Stage1OM | None = Field(
         default=None,
         description="Organização Militar (Órgão de Origem), com validação contra lista fixa.",
     )
@@ -200,10 +200,10 @@ class Stage1Result(BaseModel):
     method: str = Field(
         ..., description="regex, ai ou hybrid, indicando a origem dos dados."
     )
-    data: Optional[Stage1Data] = Field(
+    data: Stage1Data | None = Field(
         default=None, description="Campos extraídos para o estágio 1."
     )
-    confidence: Optional[Stage1Confidence] = Field(
+    confidence: Stage1Confidence | None = Field(
         default=None, description="Scores de confiança por campo e geral."
     )
 
@@ -211,35 +211,35 @@ class Stage1Result(BaseModel):
 class Stage2Instrument(BaseModel):
     """Instrumento da contratação (Pregão, Contrato, Dispensa, Inexigibilidade)."""
 
-    tipo: Optional[str] = Field(
+    tipo: str | None = Field(
         default=None,
         description="Tipo do instrumento: Pregão Eletrônico, Contrato, Dispensa ou Inexigibilidade.",
     )
-    numero: Optional[str] = Field(
+    numero: str | None = Field(
         default=None,
         description="Número do instrumento, ex.: 90004/2025.",
     )
-    confidence: Optional[int] = Field(
+    confidence: int | None = Field(
         default=None,
         description="Confiança calculada pelo resolvedor especializado de instrumento (0 a 100).",
     )
-    source: Optional[str] = Field(
+    source: str | None = Field(
         default=None,
         description="Fonte/padrão que gerou o melhor candidato de instrumento.",
     )
-    matched_text: Optional[str] = Field(
+    matched_text: str | None = Field(
         default=None,
         description="Trecho do texto da requisição que originou o instrumento escolhido.",
     )
-    normalized_text: Optional[str] = Field(
+    normalized_text: str | None = Field(
         default=None,
         description="Representação normalizada do instrumento escolhido.",
     )
-    resolution_reason: Optional[str] = Field(
+    resolution_reason: str | None = Field(
         default=None,
         description="Justificativa resumida da escolha do instrumento.",
     )
-    candidates: List[Dict[str, Any]] = Field(
+    candidates: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de candidatos considerados pelo resolvedor especializado de instrumento.",
     )
@@ -248,11 +248,11 @@ class Stage2Instrument(BaseModel):
 class Stage2UASG(BaseModel):
     """Dados da UASG/UG gerenciadora da contratação."""
 
-    codigo: Optional[str] = Field(
+    codigo: str | None = Field(
         default=None,
         description="Código UASG/UG com 6 dígitos (começa com 16).",
     )
-    nome: Optional[str] = Field(
+    nome: str | None = Field(
         default=None,
         description="Nome da OM gerenciadora associada à UASG/UG.",
     )
@@ -261,35 +261,35 @@ class Stage2UASG(BaseModel):
 class Stage2UASGDetails(BaseModel):
     """Trilha de diagnóstico da resolução de UASG/UG gerenciadora."""
 
-    codigo: Optional[str] = Field(
+    codigo: str | None = Field(
         default=None,
         description="Código UASG/UG resolvido pelo extrator especializado.",
     )
-    nome: Optional[str] = Field(
+    nome: str | None = Field(
         default=None,
         description="Nome da OM resolvido (texto original ou enriquecido pelo banco).",
     )
-    confidence: Optional[int] = Field(
+    confidence: int | None = Field(
         default=None,
         description="Confiança calculada pelo resolvedor especializado de UASG/UG (0 a 100).",
     )
-    source: Optional[str] = Field(
+    source: str | None = Field(
         default=None,
         description="Fonte/padrão que gerou o melhor candidato de UASG/UG.",
     )
-    matched_text: Optional[str] = Field(
+    matched_text: str | None = Field(
         default=None,
         description="Trecho do texto da requisição que originou a UASG/UG escolhida.",
     )
-    normalized_text: Optional[str] = Field(
+    normalized_text: str | None = Field(
         default=None,
         description="Representação normalizada 'codigo - nome' ou similar.",
     )
-    resolution_reason: Optional[str] = Field(
+    resolution_reason: str | None = Field(
         default=None,
         description="Justificativa resumida da escolha da UASG/UG.",
     )
-    candidates: List[Dict[str, Any]] = Field(
+    candidates: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de candidatos considerados pelo resolvedor especializado de UASG/UG.",
     )
@@ -298,31 +298,31 @@ class Stage2UASGDetails(BaseModel):
 class Stage2TipoEmpenho(BaseModel):
     """Tipo de empenho da requisição, com trilha de diagnóstico."""
 
-    value: Optional[str] = Field(
+    value: str | None = Field(
         default=None,
         description="Valor canônico do tipo de empenho: Ordinário, Estimativo ou Global.",
     )
-    confidence: Optional[int] = Field(
+    confidence: int | None = Field(
         default=None,
         description="Confiança calculada pelo resolvedor especializado de tipo de empenho (0 a 100).",
     )
-    source: Optional[str] = Field(
+    source: str | None = Field(
         default=None,
         description="Fonte/padrão que gerou o melhor candidato de tipo de empenho.",
     )
-    matched_text: Optional[str] = Field(
+    matched_text: str | None = Field(
         default=None,
         description="Trecho do texto da requisição que originou o tipo de empenho escolhido.",
     )
-    normalized_text: Optional[str] = Field(
+    normalized_text: str | None = Field(
         default=None,
         description="Representação normalizada do tipo de empenho escolhido (igual ao value canônico).",
     )
-    resolution_reason: Optional[str] = Field(
+    resolution_reason: str | None = Field(
         default=None,
         description="Justificativa resumida da escolha do tipo de empenho.",
     )
-    candidates: List[Dict[str, Any]] = Field(
+    candidates: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de candidatos considerados pelo resolvedor especializado de tipo de empenho.",
     )
@@ -331,35 +331,35 @@ class Stage2TipoEmpenho(BaseModel):
 class Stage2CNPJDetails(BaseModel):
     """Trilha de diagnóstico da resolução de CNPJ do fornecedor."""
 
-    value: Optional[str] = Field(
+    value: str | None = Field(
         default=None,
         description="Valor bruto/canônico usado para validação de CNPJ (apenas dígitos).",
     )
-    formatted_value: Optional[str] = Field(
+    formatted_value: str | None = Field(
         default=None,
         description="CNPJ formatado no padrão XX.XXX.XXX/XXXX-XX.",
     )
-    confidence: Optional[int] = Field(
+    confidence: int | None = Field(
         default=None,
         description="Confiança calculada pelo resolvedor especializado de CNPJ (0 a 100).",
     )
-    source: Optional[str] = Field(
+    source: str | None = Field(
         default=None,
         description="Fonte/padrão que gerou o melhor candidato de CNPJ.",
     )
-    matched_text: Optional[str] = Field(
+    matched_text: str | None = Field(
         default=None,
         description="Trecho do texto da requisição que originou o CNPJ escolhido.",
     )
-    normalized_text: Optional[str] = Field(
+    normalized_text: str | None = Field(
         default=None,
         description="Representação normalizada do CNPJ escolhido (igual ao formatted_value).",
     )
-    resolution_reason: Optional[str] = Field(
+    resolution_reason: str | None = Field(
         default=None,
         description="Justificativa resumida da escolha do CNPJ.",
     )
-    candidates: List[Dict[str, Any]] = Field(
+    candidates: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de candidatos considerados pelo resolvedor especializado de CNPJ.",
     )
@@ -368,49 +368,49 @@ class Stage2CNPJDetails(BaseModel):
 class Stage2Item(BaseModel):
     """Item da tabela de materiais/serviços da requisição."""
 
-    item: Optional[int] = Field(
+    item: int | None = Field(
         default=None, description="Número do item na tabela."
     )
-    catmat: Optional[str] = Field(
+    catmat: str | None = Field(
         default=None, description="Código CatMat/CatServ do item, se houver."
     )
-    descricao_completa: Optional[str] = Field(
+    descricao_completa: str | None = Field(
         default=None, description="Descrição completa do material/serviço."
     )
-    descricao_resumida: Optional[str] = Field(
+    descricao_resumida: str | None = Field(
         default=None,
         description=(
             "Descrição resumida (ex.: primeiros 80 caracteres) para exibição em tabela."
         ),
     )
-    unidade: Optional[str] = Field(
+    unidade: str | None = Field(
         default=None, description="Unidade de medida (un, kg, svc, m, etc.)."
     )
-    quantidade: Optional[float] = Field(
+    quantidade: float | None = Field(
         default=None, description="Quantidade solicitada."
     )
-    nd_si: Optional[str] = Field(
+    nd_si: str | None = Field(
         default=None,
         description=(
             "Classificação ND/SI canônica interna, em formato EE.SS (ex.: 30.24). "
             "Somente preenchida quando houver par elemento/subelemento válido."
         ),
     )
-    nd_si_display: Optional[str] = Field(
+    nd_si_display: str | None = Field(
         default=None,
         description=(
             "Forma amigável de exibição da ND/SI para a UI (ex.: '30/07'), "
             "derivada da resolução, sem substituir o valor original bruto."
         ),
     )
-    nd_si_original: Optional[str] = Field(
+    nd_si_original: str | None = Field(
         default=None,
         description=(
             "Valor original de ND/SI encontrado no documento/extrator, "
             "sem embelezamento ou reformatção. Mantém exatamente o texto de origem."
         ),
     )
-    nd_si_raw: Optional[str] = Field(
+    nd_si_raw: str | None = Field(
         default=None,
         description=(
             "Valor bruto de ND/SI retornado pela etapa de extração "
@@ -418,25 +418,25 @@ class Stage2Item(BaseModel):
             "ao nd_si_original, mas mantém o foco na saída direta do extrator."
         ),
     )
-    nd_si_candidates: List[Dict[str, Any]] = Field(
+    nd_si_candidates: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
             "Lista de candidatos de ND/SI considerados na resolução, incluindo "
             "elemento, subelemento, display, canônico, score e validade."
         ),
     )
-    nd_si_resolution_reason: Optional[str] = Field(
+    nd_si_resolution_reason: str | None = Field(
         default=None,
         description="Motivo/resumo da escolha da ND/SI final após resolução de candidatos.",
     )
-    nd_si_ambigua: Optional[bool] = Field(
+    nd_si_ambigua: bool | None = Field(
         default=None,
         description="Flag indicando se a extração de ND/SI foi ambígua ou parcial.",
     )
-    valor_unitario: Optional[float] = Field(
+    valor_unitario: float | None = Field(
         default=None, description="Valor unitário do item (em reais)."
     )
-    valor_total: Optional[float] = Field(
+    valor_total: float | None = Field(
         default=None, description="Valor total do item (em reais)."
     )
 
@@ -448,7 +448,7 @@ class Stage2Divergencia(BaseModel):
         ...,
         description="Tipo de divergência: 'item' para linha individual ou 'total' para soma geral.",
     )
-    item: Optional[int] = Field(
+    item: int | None = Field(
         default=None,
         description="Número do item associado à divergência, quando aplicável.",
     )
@@ -469,7 +469,7 @@ class Stage2VerificacaoCalculos(BaseModel):
         ...,
         description="Indica se todos os cálculos batem dentro da tolerância definida.",
     )
-    divergencias: List[Stage2Divergencia] = Field(
+    divergencias: list[Stage2Divergencia] = Field(
         default_factory=list,
         description="Lista de divergências por item ou no total geral.",
     )
@@ -482,11 +482,11 @@ class Stage2VerificacaoCalculos(BaseModel):
 class Stage2NDVerificationItem(BaseModel):
     """Avaliação semântica de compatibilidade entre item e ND/SI."""
 
-    item: Optional[int] = Field(
+    item: int | None = Field(
         default=None,
         description="Número do item avaliado.",
     )
-    nd_informada: Optional[str] = Field(
+    nd_informada: str | None = Field(
         default=None,
         description="ND/SI informada para o item, preferencialmente em formato de exibição.",
     )
@@ -494,19 +494,19 @@ class Stage2NDVerificationItem(BaseModel):
         ...,
         description="compatível, ressalva ou nao_avaliado.",
     )
-    justificativa: Optional[str] = Field(
+    justificativa: str | None = Field(
         default=None,
         description="Justificativa textual da análise semântica da ND/SI.",
     )
-    subelemento_sugerido: Optional[str] = Field(
+    subelemento_sugerido: str | None = Field(
         default=None,
         description="Subelemento sugerido pela análise, quando houver ressalva.",
     )
-    nome_subelemento_sugerido: Optional[str] = Field(
+    nome_subelemento_sugerido: str | None = Field(
         default=None,
         description="Nome do subelemento sugerido, quando houver ressalva.",
     )
-    confianca: Optional[int] = Field(
+    confianca: int | None = Field(
         default=None,
         description="Confiança da análise por item (0 a 100).",
     )
@@ -515,11 +515,11 @@ class Stage2NDVerificationItem(BaseModel):
 class Stage2NDVerification(BaseModel):
     """Resultado da verificação interpretativa de ND/SI por item."""
 
-    resumo: Optional[str] = Field(
+    resumo: str | None = Field(
         default=None,
         description="Resumo geral da avaliação semântica de ND/SI do estágio 2.",
     )
-    itens: List["Stage2NDVerificationItem"] = Field(
+    itens: list["Stage2NDVerificationItem"] = Field(
         default_factory=list,
         description="Lista de avaliações por item.",
     )
@@ -527,11 +527,11 @@ class Stage2NDVerification(BaseModel):
         default=True,
         description="Indica se todos os itens avaliados estão semanticamente compatíveis com a ND/SI informada.",
     )
-    ressalvas: List[str] = Field(
+    ressalvas: list[str] = Field(
         default_factory=list,
         description="Lista textual resumida de ressalvas relevantes encontradas.",
     )
-    confidence: Optional[int] = Field(
+    confidence: int | None = Field(
         default=None,
         description="Confiança geral da verificação de ND/SI (0 a 100).",
     )
@@ -540,19 +540,19 @@ class Stage2NDVerification(BaseModel):
 class Stage2Mask(BaseModel):
     """Máscara personalizada gerada para a requisição."""
 
-    texto: Optional[str] = Field(
+    texto: str | None = Field(
         default=None,
         description="Máscara final padronizada para uso operacional no SEAP/Comprasnet.",
     )
-    confidence: Optional[int] = Field(
+    confidence: int | None = Field(
         default=None,
         description="Confiança da geração da máscara (0 a 100).",
     )
-    pendencias: List[str] = Field(
+    pendencias: list[str] = Field(
         default_factory=list,
         description="Pendências ou ressalvas encontradas durante a montagem/validação da máscara.",
     )
-    campos_utilizados: List[str] = Field(
+    campos_utilizados: list[str] = Field(
         default_factory=list,
         description="Lista resumida dos campos/contextos usados para montar a máscara.",
     )
@@ -561,11 +561,11 @@ class Stage2Mask(BaseModel):
 class Stage2Data(BaseModel):
     """Dados extraídos no estágio 2 (análise da peça da requisição)."""
 
-    instrumento: Optional[Stage2Instrument] = Field(
+    instrumento: Stage2Instrument | None = Field(
         default=None,
         description="Instrumento da contratação (tipo e número).",
     )
-    uasg: Optional[Stage2UASG] = Field(
+    uasg: Stage2UASG | None = Field(
         default=None,
         description="UASG/UG gerenciadora associada à requisição.",
     )
@@ -576,7 +576,7 @@ class Stage2Data(BaseModel):
             "incluindo confiança, fonte, texto casado e candidatos considerados."
         ),
     )
-    tipo_empenho: Optional[str] = Field(
+    tipo_empenho: str | None = Field(
         default=None,
         description="Tipo de empenho: Ordinário, Estimativo ou Global.",
     )
@@ -587,11 +587,11 @@ class Stage2Data(BaseModel):
             "incluindo confiança, fonte, texto casado e candidatos considerados."
         ),
     )
-    fornecedor: Optional[str] = Field(
+    fornecedor: str | None = Field(
         default=None,
         description="Nome da empresa fornecedora.",
     )
-    cnpj: Optional[str] = Field(
+    cnpj: str | None = Field(
         default=None,
         description="CNPJ do fornecedor, no formato XX.XXX.XXX/XXXX-XX.",
     )
@@ -602,22 +602,22 @@ class Stage2Data(BaseModel):
             "fonte, texto casado e candidatos considerados."
         ),
     )
-    valor_total: Optional[float] = Field(
+    valor_total: float | None = Field(
         default=None,
         description="Valor total da requisição (em reais).",
     )
-    nd_req: Optional[str] = Field(
+    nd_req: str | None = Field(
         default=None,
         description=(
             "ND/SI agregada da requisição (elemento/subelemento predominante, "
             "normalizado, ex.: '30.07' ou apenas '30' quando sem subelemento)."
         ),
     )
-    itens: List[Stage2Item] = Field(
+    itens: list[Stage2Item] = Field(
         default_factory=list,
         description="Lista completa de itens da tabela de materiais/serviços.",
     )
-    verificacao_calculos: Optional[Stage2VerificacaoCalculos] = Field(
+    verificacao_calculos: Stage2VerificacaoCalculos | None = Field(
         default=None,
         description="Resultado da verificação automática de cálculos.",
     )
@@ -664,13 +664,13 @@ class Stage2Result(BaseModel):
         ...,
         description="regex, ai ou hybrid, indicando a origem predominante dos dados.",
     )
-    data: Optional[Stage2Data] = Field(
+    data: Stage2Data | None = Field(
         default=None, description="Campos extraídos para o estágio 2."
     )
-    confidence: Optional[Stage2Confidence] = Field(
+    confidence: Stage2Confidence | None = Field(
         default=None, description="Scores de confiança por campo e geral."
     )
-    inactive_fields: List[str] = Field(
+    inactive_fields: list[str] = Field(
         default_factory=list,
         description="Lista de campos/desdobramentos ainda inativos (ex.: verificação de ND).",
     )
@@ -679,35 +679,35 @@ class Stage2Result(BaseModel):
 class Stage3Destination(BaseModel):
     """Destino orçamentário de uma Nota de Crédito (NC)."""
 
-    esfera: Optional[str] = Field(
+    esfera: str | None = Field(
         default=None,
         description="Esfera orçamentária (ESF), geralmente 1 dígito.",
     )
-    ptres: Optional[str] = Field(
+    ptres: str | None = Field(
         default=None,
         description="Código PTRES associado ao destino.",
     )
-    fonte: Optional[str] = Field(
+    fonte: str | None = Field(
         default=None,
         description="Fonte de recursos (código numérico longo).",
     )
-    nd: Optional[str] = Field(
+    nd: str | None = Field(
         default=None,
         description="Natureza de Despesa (ND) com 6 dígitos, ex.: 339000, 339039.",
     )
-    ugr: Optional[str] = Field(
+    ugr: str | None = Field(
         default=None,
         description="UGR/UG favorecida, código de 6 dígitos.",
     )
-    pi: Optional[str] = Field(
+    pi: str | None = Field(
         default=None,
         description="Plano Interno (PI) alfanumérico.",
     )
-    valor: Optional[float] = Field(
+    valor: float | None = Field(
         default=None,
         description="Valor em reais destinado a este destino.",
     )
-    evento: Optional[str] = Field(
+    evento: str | None = Field(
         default=None,
         description="Código do evento SIAFI associado (quando aplicável).",
     )
@@ -722,29 +722,29 @@ class Stage3NCConfidence(BaseModel):
 class Stage3NC(BaseModel):
     """Representa uma Nota de Crédito identificada no PDF."""
 
-    numero_nc: Optional[str] = Field(
+    numero_nc: str | None = Field(
         default=None, description="Número da NC no formato XXXXNCXXXXXX."
     )
-    formato_detectado: Optional[str] = Field(
+    formato_detectado: str | None = Field(
         default=None,
         description=(
             "Formato detectado da NC: web_complete, siafi_complete, "
             "siafi_partial, web_standard, etc."
         ),
     )
-    ug_emitente: Optional[str] = Field(
+    ug_emitente: str | None = Field(
         default=None,
         description="UG emitente da NC, código de 6 dígitos.",
     )
-    valor_total: Optional[float] = Field(
+    valor_total: float | None = Field(
         default=None,
         description="Valor total da NC (soma dos destinos).",
     )
-    destinos: List[Stage3Destination] = Field(
+    destinos: list[Stage3Destination] = Field(
         default_factory=list,
         description="Lista de destinos orçamentários da NC (uma entrada por ND distinta).",
     )
-    campos_faltantes: List[str] = Field(
+    campos_faltantes: list[str] = Field(
         default_factory=list,
         description="Lista de campos que não puderam ser extraídos (topo ou destinos).",
     )
@@ -771,66 +771,66 @@ class Stage3NDCrossItem(BaseModel):
     - classificação correta inferida (material, serviço ou equipamento).
     """
 
-    item: Optional[int] = Field(
+    item: int | None = Field(
         default=None,
         description="Número do item na requisição.",
     )
-    descricao: Optional[str] = Field(
+    descricao: str | None = Field(
         default=None,
         description="Descrição (resumida) do item.",
     )
-    unidade: Optional[str] = Field(
+    unidade: str | None = Field(
         default=None,
         description="Unidade de medida do item (un, kg, svc, etc.).",
     )
-    nd_nc: Optional[str] = Field(
+    nd_nc: str | None = Field(
         default=None,
         description="ND completa utilizada na Nota de Crédito (NC), ex.: 339039.",
     )
-    nd_req: Optional[str] = Field(
+    nd_req: str | None = Field(
         default=None,
         description="ND/SI associada ao item na requisição (formato livre, ex.: 30.24).",
     )
-    classificacao_sugerida: Optional[str] = Field(
+    classificacao_sugerida: str | None = Field(
         default=None,
         description="Elemento sugerido para o item: '30', '39' ou '52'.",
     )
-    classificacao_label: Optional[str] = Field(
+    classificacao_label: str | None = Field(
         default=None,
         description="Rótulo amigável da classificação (Material, Serviço, Equipamento).",
     )
-    subelemento_sugerido: Optional[str] = Field(
+    subelemento_sugerido: str | None = Field(
         default=None,
         description="Código do subelemento sugerido (dois dígitos, ex.: '17').",
     )
-    nome_subelemento: Optional[str] = Field(
+    nome_subelemento: str | None = Field(
         default=None,
         description="Descrição do subelemento sugerido.",
     )
-    nd_nc_compativel: Optional[bool] = Field(
+    nd_nc_compativel: bool | None = Field(
         default=None,
         description="Se a ND da NC é compatível com a natureza do item.",
     )
-    nd_req_compativel: Optional[bool] = Field(
+    nd_req_compativel: bool | None = Field(
         default=None,
         description="Se a ND/SI da requisição é compatível com a natureza do item.",
     )
-    compativel: Optional[bool] = Field(
+    compativel: bool | None = Field(
         default=None,
         description=(
             "Compatibilidade geral do item (considerando ND da NC e da requisição). "
             "False indica alguma inconsistência relevante."
         ),
     )
-    metodo: Optional[str] = Field(
+    metodo: str | None = Field(
         default=None,
         description="Método utilizado: 'palavras_chave' (rápido) ou 'ia' (Gemini).",
     )
-    justificativa: Optional[str] = Field(
+    justificativa: str | None = Field(
         default=None,
         description="Justificativa textual da classificação (quando fornecida pela IA).",
     )
-    confianca: Optional[int] = Field(
+    confianca: int | None = Field(
         default=None,
         ge=0,
         le=100,
@@ -847,7 +847,7 @@ class Stage3NDCrosscheck(BaseModel):
     - inconsistencias: subconjunto de cruzamentos com compativel == False.
     """
 
-    cruzamentos: List[Stage3NDCrossItem] = Field(
+    cruzamentos: list[Stage3NDCrossItem] = Field(
         default_factory=list,
         description="Lista de resultados por item no cruzamento ND × Itens.",
     )
@@ -855,7 +855,7 @@ class Stage3NDCrosscheck(BaseModel):
         default=True,
         description="Indica se todas as combinações ND × Itens foram consideradas compatíveis.",
     )
-    inconsistencias: List[Stage3NDCrossItem] = Field(
+    inconsistencias: list[Stage3NDCrossItem] = Field(
         default_factory=list,
         description="Lista de itens com alguma inconsistência de ND.",
     )
@@ -871,11 +871,11 @@ class Stage3Result(BaseModel):
             "encontradas."
         ),
     )
-    ncs: List[Stage3NC] = Field(
+    ncs: list[Stage3NC] = Field(
         default_factory=list,
         description="Lista de Notas de Crédito identificadas no PDF.",
     )
-    nd_crosscheck: Optional[Stage3NDCrosscheck] = Field(
+    nd_crosscheck: Stage3NDCrosscheck | None = Field(
         default=None,
         description="Resultado do cruzamento ND × Itens entre a NC e a requisição.",
     )
@@ -885,7 +885,7 @@ class Stage5Exigencia(BaseModel):
     """Exigência individual identificada em um despacho."""
 
     descricao: str = Field(..., description="Texto da exigência.")
-    categoria: Optional[str] = Field(
+    categoria: str | None = Field(
         default=None,
         description="Categoria da exigência: correcao|documento|acao|regularizacao.",
     )
@@ -911,11 +911,11 @@ class Stage5ExigenciaStatus(BaseModel):
         ...,
         description="Status da exigência: atendida|pendente.",
     )
-    despacho_resolucao: Optional[str] = Field(
+    despacho_resolucao: str | None = Field(
         default=None,
         description="Número do despacho que resolveu a exigência, se houver.",
     )
-    evidencia: Optional[str] = Field(
+    evidencia: str | None = Field(
         default=None,
         description="Trecho/resumo que justifica o status atribuído.",
     )
@@ -924,19 +924,19 @@ class Stage5ExigenciaStatus(BaseModel):
 class Stage5Dispatch(BaseModel):
     """Representa um despacho identificado no processo."""
 
-    numero: Optional[str] = Field(
+    numero: str | None = Field(
         default=None,
         description="Número completo do despacho (incluindo seção/OM).",
     )
-    data: Optional[str] = Field(
+    data: str | None = Field(
         default=None,
         description="Data do despacho (preferencialmente no formato DD/MM/YYYY).",
     )
-    assunto: Optional[str] = Field(
+    assunto: str | None = Field(
         default=None,
         description="Assunto do despacho (texto após 'Assunto:').",
     )
-    autor_secao: Optional[str] = Field(
+    autor_secao: str | None = Field(
         default=None,
         description="Autor/seção inferido (ex.: Fisc Adm, CAF, OD).",
     )
@@ -944,25 +944,25 @@ class Stage5Dispatch(BaseModel):
         ...,
         description="Tipo do despacho: encaminhamento|exigencia|informativo.",
     )
-    resumo: Optional[str] = Field(
+    resumo: str | None = Field(
         default=None,
         description="Resumo breve (1-2 frases) do conteúdo do despacho.",
     )
-    exigencias: List[Stage5Exigencia] = Field(
+    exigencias: list[Stage5Exigencia] = Field(
         default_factory=list,
         description="Lista de exigências extraídas deste despacho.",
     )
-    palavras_chave: List[str] = Field(
+    palavras_chave: list[str] = Field(
         default_factory=list,
         description="Palavras-chave identificadas pela IA no despacho.",
     )
-    confianca: Optional[int] = Field(
+    confianca: int | None = Field(
         default=None,
         ge=0,
         le=100,
         description="Score de confiança da classificação do despacho.",
     )
-    pages: List[int] = Field(
+    pages: list[int] = Field(
         default_factory=list,
         description="Páginas do PDF que compõem o despacho.",
     )
@@ -979,15 +979,15 @@ class Stage5Result(BaseModel):
         ...,
         description="Total de despachos identificados no processo.",
     )
-    despachos: List[Stage5Dispatch] = Field(
+    despachos: list[Stage5Dispatch] = Field(
         default_factory=list,
         description="Lista de despachos analisados em ordem cronológica.",
     )
-    exigencias_pendentes: List[Stage5ExigenciaStatus] = Field(
+    exigencias_pendentes: list[Stage5ExigenciaStatus] = Field(
         default_factory=list,
         description="Exigências que permanecem pendentes após o cross-check.",
     )
-    exigencias_atendidas: List[Stage5ExigenciaStatus] = Field(
+    exigencias_atendidas: list[Stage5ExigenciaStatus] = Field(
         default_factory=list,
         description="Exigências que foram atendidas em despachos posteriores.",
     )
@@ -995,7 +995,7 @@ class Stage5Result(BaseModel):
         ...,
         description='Resumo textual do veredicto (ex.: "S/A").',
     )
-    confidence: Dict[str, Any] = Field(
+    confidence: dict[str, Any] = Field(
         default_factory=dict,
         description="Mapa de scores de confiança (ex.: {'geral': 90}).",
     )
@@ -1010,7 +1010,7 @@ class Stage6Issue(BaseModel):
         description="Tipo do problema: reprovacao|ressalva|pendencia_despacho.",
     )
     descricao: str = Field(..., description="Descrição resumida do problema.")
-    detalhes: Optional[str] = Field(
+    detalhes: str | None = Field(
         default=None,
         description="Detalhes adicionais relevantes (valores, datas, etc.).",
     )
@@ -1027,19 +1027,19 @@ class Stage6Result(BaseModel):
         ...,
         description="Texto legível do veredicto (ex.: 'Aprovado com Ressalva').",
     )
-    problemas: List[Dict[str, Any]] = Field(
+    problemas: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de todos os problemas agregados (reprovações, ressalvas e pendências informativas).",
     )
-    reprovacoes: List[Dict[str, Any]] = Field(
+    reprovacoes: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de reprovações (problemas graves).",
     )
-    ressalvas: List[Dict[str, Any]] = Field(
+    ressalvas: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Lista de ressalvas (problemas menores que não impedem o prosseguimento).",
     )
-    pendencias_despachos: List[Dict[str, Any]] = Field(
+    pendencias_despachos: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Pendências oriundas de despachos (Estágio 5), apenas informativas.",
     )
@@ -1047,7 +1047,7 @@ class Stage6Result(BaseModel):
         ...,
         description="Texto do despacho sugerido (pode ser vazio quando veredicto for 'aprovado').",
     )
-    confidence: Dict[str, Any] = Field(
+    confidence: dict[str, Any] = Field(
         default_factory=dict,
         description="Mapa com score de confiança geral para a decisão.",
     )
@@ -1060,12 +1060,12 @@ class Stage4Result(BaseModel):
         ...,
         description="approved, rejected ou partial (aprovado com ressalva por complementar).",
     )
-    cadin: Dict[str, Any] = Field(default_factory=dict)
-    tcu: Dict[str, Any] = Field(default_factory=dict)
-    sicaf: Dict[str, Any] = Field(default_factory=dict)
-    cnpj_cruzamento: Dict[str, Any] = Field(default_factory=dict)
-    complementares: List[Dict[str, Any]] = Field(default_factory=list)
-    confidence: Dict[str, Any] = Field(default_factory=dict)
+    cadin: dict[str, Any] = Field(default_factory=dict)
+    tcu: dict[str, Any] = Field(default_factory=dict)
+    sicaf: dict[str, Any] = Field(default_factory=dict)
+    cnpj_cruzamento: dict[str, Any] = Field(default_factory=dict)
+    complementares: list[dict[str, Any]] = Field(default_factory=list)
+    confidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class AnalyzeStages(BaseModel):
@@ -1099,7 +1099,7 @@ class AnalyzeStages(BaseModel):
 class AnalyzeResponse(BaseModel):
     """Resposta do endpoint /api/analyze."""
 
-    extraction: Dict[str, str] = Field(
+    extraction: dict[str, str] = Field(
         ..., description='Mapa "pagina_n" -> texto bruto extraído.'
     )
     metadata: AnalyzeMetadata = Field(

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Timer, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2, Timer, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -17,7 +17,7 @@ import {
   getAnalysisById,
   type AnalysisFull,
 } from '../../../lib/api';
-import type { AnalyzeResult } from '../../../types/extraction';
+import type { AnalyzeFullResult, AnalyzeResult } from '../../../types/extraction';
 
 function formatTimer(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -62,24 +62,12 @@ export default function HistoricoDetailPage() {
     setError(null);
     try {
       const data = await getAnalysisById(id);
-      // Debug em desenvolvimento
-      if (process.env.NODE_ENV !== 'production') {
-        // eslint-disable-next-line no-console
-        console.log('[HISTORICO] Dados recebidos:', data);
-        // eslint-disable-next-line no-console
-        console.log(
-          '[HISTORICO] Stage1:',
-          (data as any)?.dados_completos?.stages?.stage1,
-        );
-      }
       // Garante que dados_completos seja objeto
-      if (typeof (data as any).dados_completos === 'string') {
+      if (typeof data.dados_completos === 'string') {
         try {
-          (data as any).dados_completos = JSON.parse(
-            (data as any).dados_completos as string,
-          );
+          data.dados_completos = JSON.parse(data.dados_completos as string);
         } catch {
-          (data as any).dados_completos = {} as any;
+          data.dados_completos = {} as unknown as AnalyzeFullResult;
         }
       }
       setAnalysis(data);
@@ -95,24 +83,26 @@ export default function HistoricoDetailPage() {
     load();
   }, [load]);
 
-  if (!id) {
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-[var(--text-secondary)]">ID não informado.</p>
-        <Link
-          href="/historico"
-          className="inline-flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar ao histórico
-        </Link>
-      </div>
-    );
-  }
+  const handleDelete = async () => {
+    if (!analysis) return;
+    setDeleting(true);
+    try {
+      await deleteAnalysis(analysis.id);
+      setToast('Análise excluída com sucesso');
+      setTimeout(() => {
+        router.push('/historico');
+      }, 1000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao excluir');
+      setDeleting(false);
+      setShowDeleteModal(false);
+    }
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex h-[400px] flex-col items-center justify-center gap-3">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--accent-primary)]" />
         <p className="text-sm text-[var(--text-secondary)]">Carregando análise...</p>
       </div>
     );
@@ -120,13 +110,18 @@ export default function HistoricoDetailPage() {
 
   if (error || !analysis) {
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-rose-600 dark:text-rose-400">{error ?? 'Análise não encontrada.'}</p>
+      <div className="flex h-[400px] flex-col items-center justify-center gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-500/10 text-rose-500">
+          <AlertTriangle className="h-6 w-6" />
+        </div>
+        <p className="text-sm text-[var(--text-secondary)]">
+          {error || 'Análise não encontrada'}
+        </p>
         <Link
           href="/historico"
-          className="inline-flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400"
+          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-4 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)]"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-3.5 w-3.5" />
           Voltar ao histórico
         </Link>
       </div>
@@ -135,17 +130,17 @@ export default function HistoricoDetailPage() {
 
   const result = analysis.dados_completos as unknown as AnalyzeResult;
   const stage1 = result.stages?.stage1;
-  const stage2 = (result.stages?.stage2 as any) ?? null;
-  const stage3 = (result.stages?.stage3 as any) ?? null;
-  const stage4 = (result.stages?.stage4 as any) ?? null;
-  const stage5 = (result.stages?.stage5 as any) ?? null;
-  const stage6 = (result.stages?.stage6 as any) ?? null;
+  const stage2 = result.stages?.stage2 ?? null;
+  const stage3 = result.stages?.stage3 ?? null;
+  const stage4 = result.stages?.stage4 ?? null;
+  const stage5 = result.stages?.stage5 ?? null;
+  const stage6 = result.stages?.stage6 ?? null;
   const metadata = result.metadata ?? { total_paginas: 0, paginas_com_texto: 0 };
 
   const hasStage4Reprovacao =
-    stage6?.reprovacoes?.some((i: any) => i.estagio === 4) === true;
+    stage6?.reprovacoes?.some((i: { estagio?: number }) => i.estagio === 4) === true;
   const hasStage4Ressalva =
-    stage6?.ressalvas?.some((i: any) => i.estagio === 4) === true;
+    stage6?.ressalvas?.some((i: { estagio?: number }) => i.estagio === 4) === true;
   const stage4StatusOverride: 'ok' | 'warn' | 'error' | 'none' =
     hasStage4Reprovacao ? 'error' : hasStage4Ressalva ? 'warn' : 'ok';
 
@@ -180,29 +175,11 @@ export default function HistoricoDetailPage() {
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  if (!analysis || deleting) return;
-                  setDeleting(true);
-                  try {
-                    await deleteAnalysis(analysis.id);
-                    setToast('Análise excluída');
-                    setTimeout(() => {
-                      setToast(null);
-                      router.push('/historico');
-                    }, 2000);
-                  } catch (e) {
-                    setToast(
-                      e instanceof Error
-                        ? e.message
-                        : 'Erro ao excluir análise',
-                    );
-                    setTimeout(() => setToast(null), 2500);
-                    setDeleting(false);
-                  }
-                }}
-                className="rounded-lg border border-rose-500/60 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-lg border border-rose-500/60 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:opacity-50 dark:text-rose-200"
               >
-                Excluir
+                {deleting ? 'Excluindo...' : 'Excluir'}
               </button>
             </div>
           </div>

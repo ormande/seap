@@ -4,15 +4,14 @@ import logging
 import os
 import traceback
 from pathlib import Path
-from typing import Annotated, Any, Dict
-
-from pydantic import BaseModel, Field
+from typing import Annotated, Any
 
 import pdfplumber
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 try:
     from .ai_processor import GeminiProcessor
@@ -33,6 +32,8 @@ except ImportError:
 try:
     from .database import (
         add_uasg as db_add_uasg,
+    )
+    from .database import (
         close_db,
         delete_analysis,
         get_all_uasgs,
@@ -45,6 +46,8 @@ try:
 except ImportError:
     from database import (
         add_uasg as db_add_uasg,
+    )
+    from database import (
         close_db,
         delete_analysis,
         get_all_uasgs,
@@ -69,10 +72,10 @@ except ImportError:
 
 try:
     from .models import (
-        AnchorConfig,
+        AnalyzeMetadata,
         AnalyzeResponse,
         AnalyzeStages,
-        AnalyzeMetadata,
+        AnchorConfig,
         CorreçãoItem,
         ExtractionResult,
         FullExtractionResult,
@@ -90,10 +93,10 @@ try:
     )
 except ImportError:
     from models import (
-        AnchorConfig,
+        AnalyzeMetadata,
         AnalyzeResponse,
         AnalyzeStages,
-        AnalyzeMetadata,
+        AnchorConfig,
         CorreçãoItem,
         ExtractionResult,
         FullExtractionResult,
@@ -112,23 +115,23 @@ except ImportError:
 
 try:
     from .stages import (
+        nd_crosscheck,
         stage1_identification,
         stage2_analysis,
         stage3_nc,
         stage4_documentation,
         stage5_dispatches,
         stage6_decision,
-        nd_crosscheck,
     )
 except ImportError:
     from stages import (
+        nd_crosscheck,
         stage1_identification,
         stage2_analysis,
         stage3_nc,
         stage4_documentation,
         stage5_dispatches,
         stage6_decision,
-        nd_crosscheck,
     )
 
 app = FastAPI(title="Licitacao PDF Extractor", version="0.1.0")
@@ -142,7 +145,7 @@ app.add_middleware(
 )
 
 
-def get_current_user(request: Request) -> Dict[str, str]:
+def get_current_user(request: Request) -> dict[str, str]:
     """Extrai informações básicas do usuário a partir dos headers enviados pelo frontend."""
     return {
         "email": request.headers.get("X-User-Email", "anonymous"),
@@ -153,7 +156,7 @@ def get_current_user(request: Request) -> Dict[str, str]:
 
 @app.get("/")
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Endpoint de verificação de saúde e anti-hibernação do Render."""
     return {"status": "online", "app": "SEAP Extractor API"}
 
@@ -234,7 +237,7 @@ async def extract_pdf(
 
         return extraction_result
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Em produção, idealmente registrar o erro em um logger estruturado.
         raise HTTPException(
             status_code=500,
@@ -370,7 +373,7 @@ async def extract_pdf_full(
 
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail=f"Erro no pipeline de extração: {exc}",
@@ -697,7 +700,7 @@ async def analyze_pdf(
 class SaveAnalysisRequest(BaseModel):
     """Payload para POST /api/analyses."""
 
-    dados_completos: Dict[str, Any] = Field(..., description="Resultado completo dos 6 estágios.")
+    dados_completos: dict[str, Any] = Field(..., description="Resultado completo dos 6 estágios.")
     tempo_analise: int = Field(default=0, ge=0, description="Tempo de análise em segundos.")
     data_analise: str | None = Field(default=None, description="Data/hora da análise em ISO (opcional).")
 
@@ -750,7 +753,7 @@ async def save_analysis_endpoint(
 
 
 @app.get("/api/analyses")
-async def list_analyses(request: Request) -> list[Dict[str, Any]]:
+async def list_analyses(request: Request) -> list[dict[str, Any]]:
     """
     Lista todas as análises salvas do usuário autenticado (sem dados_completos),
     ordenadas por data_analise desc.
@@ -760,7 +763,7 @@ async def list_analyses(request: Request) -> list[Dict[str, Any]]:
 
 
 @app.get("/api/analyses/{analysis_id}")
-async def get_analysis_endpoint(analysis_id: str, request: Request) -> Dict[str, Any]:
+async def get_analysis_endpoint(analysis_id: str, request: Request) -> dict[str, Any]:
     """Retorna uma análise completa com dados_completos, se pertencer ao usuário."""
     user = get_current_user(request)
     result = await get_analysis(analysis_id, user["user_id"])
@@ -779,7 +782,7 @@ async def get_analysis_endpoint(analysis_id: str, request: Request) -> Dict[str,
 
 
 @app.delete("/api/analyses/{analysis_id}")
-async def remove_analysis(analysis_id: str, request: Request) -> Dict[str, Any]:
+async def remove_analysis(analysis_id: str, request: Request) -> dict[str, Any]:
     """Remove uma análise do banco, se pertencer ao usuário."""
     user = get_current_user(request)
     deleted = await delete_analysis(analysis_id, user["user_id"])
@@ -799,7 +802,7 @@ class AddUASGRequest(BaseModel):
 
 
 @app.post("/api/uasgs")
-async def add_uasg_endpoint(body: AddUASGRequest) -> Dict[str, Any]:
+async def add_uasg_endpoint(body: AddUASGRequest) -> dict[str, Any]:
     """
     Adiciona ou atualiza uma UASG no banco do sistema.
     Quando a UASG não é reconhecida na análise, o frontend pode enviar o nome
@@ -823,7 +826,7 @@ async def add_uasg_endpoint(body: AddUASGRequest) -> Dict[str, Any]:
 
 
 @app.get("/api/uasgs")
-async def list_uasgs() -> list[Dict[str, Any]]:
+async def list_uasgs() -> list[dict[str, Any]]:
     """Lista todas as UASGs cadastradas (para consulta ou debug)."""
     return await get_all_uasgs()
 

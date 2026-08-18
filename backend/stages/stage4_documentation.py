@@ -8,12 +8,10 @@ complementares via IA quando houver reprovação.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -53,7 +51,7 @@ CNPJ_REGEX = re.compile(
 CNPJ_STRICT = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}")
 
 
-def _normalize_cnpj(cnpj: Optional[str]) -> str:
+def _normalize_cnpj(cnpj: str | None) -> str:
     """Retorna apenas dígitos do CNPJ para comparação."""
     if not cnpj:
         return ""
@@ -61,9 +59,9 @@ def _normalize_cnpj(cnpj: Optional[str]) -> str:
 
 
 def find_documentation_pages(
-    all_pages: Dict[str, str],
-    used_pages: Optional[Dict[str, Set[int]]] = None,
-) -> Dict[str, List[int]]:
+    all_pages: dict[str, str],
+    used_pages: dict[str, set[int]] | None = None,
+) -> dict[str, list[int]]:
     """
     Identifica páginas de CADIN, TCU e SICAF por âncoras.
     used_pages: dict opcional com chaves ex.: "requisition", "stage1" com sets de números.
@@ -71,14 +69,14 @@ def find_documentation_pages(
     """
     if used_pages is None:
         used_pages = {}
-    used_set: Set[int] = set()
+    used_set: set[int] = set()
     for pages in used_pages.values():
         used_set |= set(pages)
 
-    cadin_pages: List[int] = []
-    tcu_pages: List[int] = []
-    sicaf_pages: List[int] = []
-    other_pages: List[int] = []
+    cadin_pages: list[int] = []
+    tcu_pages: list[int] = []
+    sicaf_pages: list[int] = []
+    other_pages: list[int] = []
 
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
@@ -88,7 +86,6 @@ def find_documentation_pages(
         except ValueError:
             continue
 
-        t = (text or "").upper()
         is_cadin = any(re.search(a, text or "", re.IGNORECASE) for a in CADIN_ANCHORS)
         is_tcu = any(re.search(a, text or "", re.IGNORECASE) for a in TCU_ANCHORS)
         is_sicaf = any(re.search(a, text or "", re.IGNORECASE) for a in SICAF_ANCHORS)
@@ -110,12 +107,12 @@ def find_documentation_pages(
     }
 
 
-def extract_cadin(text: str) -> Dict[str, Any]:
+def extract_cadin(text: str) -> dict[str, Any]:
     """
     Extração mecânica por regex do CADIN.
     Retorna: {cnpj, situacao, data_emissao, aprovado}.
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "cnpj": None,
         "situacao": None,
         "data_emissao": None,
@@ -155,12 +152,12 @@ def extract_cadin(text: str) -> Dict[str, Any]:
     return result
 
 
-def extract_tcu(text: str) -> Dict[str, Any]:
+def extract_tcu(text: str) -> dict[str, Any]:
     """
     Extração mecânica dos 4 blocos TCU.
     Retorna: {cnpj, data_consulta, verificacoes: [{cadastro, orgao, resultado, aprovado}], aprovado}.
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "cnpj": None,
         "data_consulta": None,
         "verificacoes": [],
@@ -225,7 +222,7 @@ def extract_tcu(text: str) -> Dict[str, Any]:
     return result
 
 
-def _parse_date_br(s: Optional[str]) -> Optional[datetime]:
+def _parse_date_br(s: str | None) -> datetime | None:
     """Converte DD/MM/YYYY para datetime."""
     if not s or not re.match(r"\d{2}/\d{2}/\d{4}", s):
         return None
@@ -235,12 +232,12 @@ def _parse_date_br(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def extract_sicaf(text: str, analysis_date: str) -> Dict[str, Any]:
+def extract_sicaf(text: str, analysis_date: str) -> dict[str, Any]:
     """
     Extração mecânica do SICAF e comparação de validades com analysis_date (DD/MM/YYYY).
     Retorna: {cnpj, razao_social, situacao, data_emissao, niveis, ocorrencias, itens_vencidos, aprovado}.
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "cnpj": None,
         "razao_social": None,
         "situacao_fornecedor": None,
@@ -323,7 +320,7 @@ def extract_sicaf(text: str, analysis_date: str) -> Dict[str, Any]:
 
     # Ocorrências: extrair valor após cada rótulo; "Nada Consta" = aprovado,
     # outro texto = reprovado, não encontrado/vazio = "Não identificado" (amarelo)
-    OCORRENCIAS_LABELS: Dict[str, str] = {
+    OCORRENCIAS_LABELS: dict[str, str] = {
         "ocorrencia": "Ocorrência",
         "impedimento_licitar": "Impedimento de Licitar",
         "vinculo_servico_publico": "Vínculo com Serviço Público",
@@ -355,17 +352,17 @@ def extract_sicaf(text: str, analysis_date: str) -> Dict[str, Any]:
 
 
 def cross_check_cnpj(
-    stage2_cnpj: Optional[str],
-    cadin_cnpj: Optional[str],
-    tcu_cnpj: Optional[str],
-    sicaf_cnpj: Optional[str],
-) -> Dict[str, Any]:
+    stage2_cnpj: str | None,
+    cadin_cnpj: str | None,
+    tcu_cnpj: str | None,
+    sicaf_cnpj: str | None,
+) -> dict[str, Any]:
     """
     Compara todos os CNPJs com o do Estágio 2.
     Retorna: {consistente: bool, cnpj_referencia: str, divergencias: [{doc, cnpj_doc, esperado}]}.
     """
     ref = _normalize_cnpj(stage2_cnpj)
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "cnpj_referencia": stage2_cnpj or "",
         "consistente": True,
         "divergencias": [],
@@ -426,11 +423,11 @@ Retorne APENAS JSON válido."""
 
 
 def search_complementary_docs(
-    all_pages: Dict[str, str],
-    other_pages: List[int],
-    irregularities: List[str],
+    all_pages: dict[str, str],
+    other_pages: list[int],
+    irregularities: list[str],
     cnpj: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Envia páginas não classificadas ao Gemini para buscar documentos que anulem reprovações.
     Só deve ser chamado quando houver irregularidades.
@@ -448,7 +445,7 @@ def search_complementary_docs(
         lista_irregularidades=lista_irr,
         cnpj=cnpj or "não informado",
     )
-    texts: List[str] = []
+    texts: list[str] = []
     for p in other_pages[:15]:  # Limitar páginas para não estourar contexto
         key = f"pagina_{p}"
         texts.append(f"--- Página {p} ---\n{(all_pages.get(key) or '')[:4000]}")
@@ -465,12 +462,12 @@ def search_complementary_docs(
 
 
 def run(
-    all_pages: Dict[str, str],
-    stage2_data: Optional[Dict[str, Any]] = None,
-    used_pages: Optional[Dict[str, Set[int]]] = None,
-    analysis_date: Optional[str] = None,
+    all_pages: dict[str, str],
+    stage2_data: dict[str, Any] | None = None,
+    used_pages: dict[str, set[int]] | None = None,
+    analysis_date: str | None = None,
     nup_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Orquestra o Estágio 4: identifica páginas de CADIN/TCU/SICAF, extrai,
     cruza CNPJ e opcionalmente busca documentos complementares.
@@ -484,9 +481,9 @@ def run(
         cnpj_ref = (stage2_data["data"] or {}).get("cnpj")
 
     doc_pages = find_documentation_pages(all_pages, used_pages)
-    cadin_data: Optional[Dict[str, Any]] = None
-    tcu_data: Optional[Dict[str, Any]] = None
-    sicaf_data: Optional[Dict[str, Any]] = None
+    cadin_data: dict[str, Any] | None = None
+    tcu_data: dict[str, Any] | None = None
+    sicaf_data: dict[str, Any] | None = None
 
     if doc_pages["cadin"]:
         text = " ".join(
@@ -543,7 +540,7 @@ def run(
     cnpj_ok = "consistente" if cnpj_cruzamento.get("consistente") else "DIVERGENTE"
     print(f"[Stage4][{nup_id}] CNPJ cruzamento: {cnpj_ok} (ref={cnpj_ref or '?'})", flush=True)
 
-    irregularities: List[str] = []
+    irregularities: list[str] = []
     if not cnpj_cruzamento.get("consistente"):
         for d in cnpj_cruzamento.get("divergencias") or []:
             irregularities.append(
@@ -557,7 +554,7 @@ def run(
         for mot in sicaf_data.get("motivos_reprovacao") or sicaf_data.get("itens_vencidos") or []:
             irregularities.append(f"SICAF: {mot}")
 
-    complementares: List[Dict[str, Any]] = []
+    complementares: list[dict[str, Any]] = []
     if irregularities:
         print(
             f"[Stage4][{nup_id}] {len(irregularities)} irregularidade(s), buscando complementares...",

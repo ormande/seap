@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -138,17 +139,17 @@ Retorne APENAS JSON válido."""
 class _DispatchMeta:
     """Representa um despacho identificado no PDF antes de normalizar para Pydantic."""
 
-    numero: Optional[str]
-    data_str: Optional[str]
-    assunto: Optional[str]
-    autor_secao: Optional[str]
-    pages: List[int]
+    numero: str | None
+    data_str: str | None
+    assunto: str | None
+    autor_secao: str | None
+    pages: list[int]
     body_text: str
     full_text: str
-    sort_date: Optional[datetime]
+    sort_date: datetime | None
 
 
-def _parse_date_from_text(text: str) -> Tuple[Optional[str], Optional[datetime]]:
+def _parse_date_from_text(text: str) -> tuple[str | None, datetime | None]:
     """
     Tenta extrair a data do despacho no formato DD/MM/YYYY ou por extenso.
     Retorna (data_normalizada, datetime) ou (None, None).
@@ -184,7 +185,7 @@ def _parse_date_from_text(text: str) -> Tuple[Optional[str], Optional[datetime]]
     return None, None
 
 
-def _extract_assunto(text: str) -> Optional[str]:
+def _extract_assunto(text: str) -> str | None:
     """Extrai o assunto do despacho a partir da linha 'Assunto:'."""
     if not text:
         return None
@@ -195,7 +196,7 @@ def _extract_assunto(text: str) -> Optional[str]:
     return None
 
 
-def _infer_autor_from_numero(numero: Optional[str]) -> Optional[str]:
+def _infer_autor_from_numero(numero: str | None) -> str | None:
     """
     Infere autor/seção a partir do número do despacho,
     buscando siglas típicas como Fisc Adm, CAF, OD.
@@ -220,9 +221,9 @@ def _normalize_whitespace(text: str) -> str:
 
 
 def find_dispatch_pages(
-    all_pages: Dict[str, str],
-    used_pages: Optional[Dict[str, Set[int]]] = None,
-) -> List[_DispatchMeta]:
+    all_pages: dict[str, str],
+    used_pages: dict[str, set[int]] | None = None,
+) -> list[_DispatchMeta]:
     """
     Busca páginas com cabeçalho de despacho ("Despacho Nº"/"Despacho N°").
 
@@ -233,11 +234,11 @@ def find_dispatch_pages(
     """
     if used_pages is None:
         used_pages = {}
-    already_used: Set[int] = set()
+    already_used: set[int] = set()
     for pages in used_pages.values():
         already_used |= set(pages)
 
-    page_items: List[Tuple[int, str]] = []
+    page_items: list[tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
             continue
@@ -248,8 +249,8 @@ def find_dispatch_pages(
         page_items.append((idx, text or ""))
     page_items.sort(key=lambda x: x[0])
 
-    dispatches: List[_DispatchMeta] = []
-    current: Optional[_DispatchMeta] = None
+    dispatches: list[_DispatchMeta] = []
+    current: _DispatchMeta | None = None
 
     for idx, text in page_items:
         if idx in already_used:
@@ -293,7 +294,7 @@ def find_dispatch_pages(
                 current = None
 
     # Ordenação cronológica (quando possível).
-    def _sort_key(d: _DispatchMeta) -> Tuple[datetime, int]:
+    def _sort_key(d: _DispatchMeta) -> tuple[datetime, int]:
         if d.sort_date:
             return d.sort_date, d.pages[0]
         # Fallback: usa ordem de página com uma data fictícia.
@@ -303,7 +304,7 @@ def find_dispatch_pages(
     return dispatches
 
 
-def _classify_dispatch_with_keywords(body_text: str) -> Dict[str, Any]:
+def _classify_dispatch_with_keywords(body_text: str) -> dict[str, Any]:
     """
     Classificação heurística baseada em palavras-chave quando Gemini estiver indisponível.
     Útil como fallback para não quebrar o estágio 5.
@@ -362,7 +363,7 @@ def _classify_dispatch_with_keywords(body_text: str) -> Dict[str, Any]:
     }
 
 
-def classify_dispatch(full_text: str, body_text: Optional[str] = None) -> Dict[str, Any]:
+def classify_dispatch(full_text: str, body_text: str | None = None) -> dict[str, Any]:
     """
     Classifica um despacho usando heurística de tamanho e Gemini.
 
@@ -414,7 +415,7 @@ def classify_dispatch(full_text: str, body_text: Optional[str] = None) -> Dict[s
 def cross_check_requirements(
     dispatches: Sequence[Stage5Dispatch],
     requirements: Sequence[Stage5Exigencia],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Envia todos os despachos + exigências ao Gemini para verificar se
     foram atendidas em despachos posteriores.
@@ -498,10 +499,10 @@ def cross_check_requirements(
 
 
 def run(
-    all_pages: Dict[str, str],
-    used_pages: Optional[Dict[str, Set[int]]] = None,
+    all_pages: dict[str, str],
+    used_pages: dict[str, set[int]] | None = None,
     nup_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Orquestra o Estágio 5:
     - Localiza despachos no documento.
@@ -522,8 +523,8 @@ def run(
         )
         return result.model_dump()
 
-    dispatch_models: List[Stage5Dispatch] = []
-    all_requirements: List[Stage5Exigencia] = []
+    dispatch_models: list[Stage5Dispatch] = []
+    all_requirements: list[Stage5Exigencia] = []
 
     # Último despacho cronológico (ultimato / ordem de análise) não gera pendências.
     final_meta = metas[-1]
@@ -540,7 +541,7 @@ def run(
         except (TypeError, ValueError):
             confianca = 0
 
-        exigencias: List[Stage5Exigencia] = []
+        exigencias: list[Stage5Exigencia] = []
         if isinstance(exigencias_raw, list):
             for raw in exigencias_raw:
                 if not isinstance(raw, dict):
@@ -562,7 +563,7 @@ def run(
                 if meta is not final_meta:
                     all_requirements.append(ex)
 
-        palavras_chave: List[str] = []
+        palavras_chave: list[str] = []
         if isinstance(palavras_chave_raw, list):
             for w in palavras_chave_raw:
                 if isinstance(w, str):
@@ -611,8 +612,8 @@ def run(
         flush=True,
     )
 
-    pendentes: List[Stage5ExigenciaStatus] = []
-    atendidas: List[Stage5ExigenciaStatus] = []
+    pendentes: list[Stage5ExigenciaStatus] = []
+    atendidas: list[Stage5ExigenciaStatus] = []
 
     for item in status_list:
         if not isinstance(item, dict):

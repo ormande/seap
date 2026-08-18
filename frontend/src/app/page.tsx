@@ -176,7 +176,6 @@ export default function HomePage() {
       let buffer = '';
 
       // Loop de leitura do stream SSE.
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -367,16 +366,16 @@ export default function HomePage() {
   }
 
   const stage1 = result.stages.stage1;
-  const stage2 = (result.stages.stage2 as any) ?? null;
-  const stage3 = (result.stages.stage3 as any) ?? null;
-  const stage4 = (result.stages.stage4 as any) ?? null;
-  const stage5 = (result.stages.stage5 as any) ?? null;
-  const stage6 = (result.stages.stage6 as any) ?? null;
+  const stage2 = result.stages.stage2 ?? null;
+  const stage3 = result.stages.stage3 ?? null;
+  const stage4 = result.stages.stage4 ?? null;
+  const stage5 = result.stages.stage5 ?? null;
+  const stage6 = result.stages.stage6 ?? null;
 
   const hasStage4Reprovacao =
-    stage6?.reprovacoes?.some((i: any) => i.estagio === 4) === true;
+    stage6?.reprovacoes?.some((i: { estagio?: number }) => i.estagio === 4) === true;
   const hasStage4Ressalva =
-    stage6?.ressalvas?.some((i: any) => i.estagio === 4) === true;
+    stage6?.ressalvas?.some((i: { estagio?: number }) => i.estagio === 4) === true;
   const stage4StatusOverride: 'ok' | 'warn' | 'error' | 'none' =
     hasStage4Reprovacao ? 'error' : hasStage4Ressalva ? 'warn' : 'ok';
 

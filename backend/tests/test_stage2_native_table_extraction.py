@@ -1,11 +1,11 @@
 from pathlib import Path
+
 import pytest
 
 from backend.stages.stage2_analysis import (
     _extract_native_item_table_tsv,
     _merge_native_table_hints,
 )
-
 
 FIXTURES_DIR = (
     Path(__file__).resolve().parent / "fixtures" / "stage2_requisicoes" / "nativas"

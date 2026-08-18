@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -33,17 +33,15 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+const emptySubscribe = () => () => {};
+
 export function Sidebar() {
   const pathname = usePathname();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
   const { data: session } = useSession();
   const user = session?.user;
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const isDark = (theme ?? resolvedTheme) === "dark";
 

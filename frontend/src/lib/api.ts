@@ -15,8 +15,8 @@ export async function fetchAPI(
   options: RequestInit = {},
 ): Promise<Response> {
   const session = await getSession();
-  const accessToken = (session as any)?.accessToken || '';
-  const userId = (session?.user as any)?.id || '';
+  const accessToken = (session as { accessToken?: string })?.accessToken || '';
+  const userId = (session?.user as { id?: string })?.id || '';
   const email = session?.user?.email || '';
   const name = session?.user?.name || '';
 

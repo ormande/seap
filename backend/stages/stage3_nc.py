@@ -18,9 +18,8 @@ import logging
 import os
 import re
 import time
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import Any
 
 from google import genai
 from google.genai import types
@@ -153,7 +152,7 @@ def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _safe_decimal(value: Any) -> Optional[Decimal]:
+def _safe_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     if isinstance(value, (int, float, Decimal)):
@@ -174,7 +173,7 @@ def _safe_decimal(value: Any) -> Optional[Decimal]:
     return None
 
 
-def _parse_brazilian_currency(value: str) -> Optional[Decimal]:
+def _parse_brazilian_currency(value: str) -> Decimal | None:
     """
     Converte um valor no formato brasileiro (ex.: '2.000,00') para Decimal.
     """
@@ -191,12 +190,12 @@ def _parse_brazilian_currency(value: str) -> Optional[Decimal]:
         return None
 
 
-def deduplicate_events(destinos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def deduplicate_events(destinos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Para NDs iguais, manter SOMENTE o evento com número MAIOR
     (mais recente). Recalcular valor_total após deduplicação.
     """
-    nd_map: Dict[Any, Dict[str, Any]] = {}
+    nd_map: dict[Any, dict[str, Any]] = {}
     for dest in destinos:
         nd = dest.get("nd")
         evento = dest.get("evento", "0")
@@ -206,7 +205,7 @@ def deduplicate_events(destinos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _apply_deduplication_and_recalc(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     destinos_key: str = "destinos",
     valor_total_key: str = "valor_total",
     nup_id: str = "",
@@ -229,7 +228,7 @@ def _apply_deduplication_and_recalc(
     )
 
 
-def _group_nc_pages(nc_pages: List[Dict[str, Any]]) -> List[List[int]]:
+def _group_nc_pages(nc_pages: list[dict[str, Any]]) -> list[list[int]]:
     """
     Agrupa páginas consecutivas de mesmo formato como pertencentes à mesma NC.
     """
@@ -238,8 +237,8 @@ def _group_nc_pages(nc_pages: List[Dict[str, Any]]) -> List[List[int]]:
 
     # Ordena por número de página.
     sorted_pages = sorted(nc_pages, key=lambda x: x["page"])
-    groups: List[List[int]] = []
-    current_group: List[int] = [sorted_pages[0]["page"]]
+    groups: list[list[int]] = []
+    current_group: list[int] = [sorted_pages[0]["page"]]
     current_format = sorted_pages[0]["format"]
     last_page = sorted_pages[0]["page"]
 
@@ -262,13 +261,13 @@ def _group_nc_pages(nc_pages: List[Dict[str, Any]]) -> List[List[int]]:
 
 
 def find_nc_pages(
-    all_pages: Dict[str, str],
-    image_pages: Optional[List[int]] = None,
-    pdf_path: Optional[str] = None,
+    all_pages: dict[str, str],
+    image_pages: list[int] | None = None,
+    pdf_path: str | None = None,
     total_pages: int = 0,
-    req_pages: Optional[List[int]] = None,
+    req_pages: list[int] | None = None,
     nup_id: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Identifica páginas que contêm NCs e agrupa em conjuntos por NC.
 
@@ -311,11 +310,11 @@ def find_nc_pages(
         r"Nos\s+termos\s+contidos",
     ]
 
-    nc_pages_meta: List[Dict[str, Any]] = []
-    nc_groups: List[Dict[str, Any]] = []
-    ignored_pages: List[int] = []
-    identified_pages: List[int] = []
-    discarded_pages: List[int] = []
+    nc_pages_meta: list[dict[str, Any]] = []
+    nc_groups: list[dict[str, Any]] = []
+    ignored_pages: list[int] = []
+    identified_pages: list[int] = []
+    discarded_pages: list[int] = []
 
     NC_KEYWORDS = [
         "Nota de Crédito", "SIAFI", "NC", "UG Emitente", "Destino",
@@ -411,8 +410,8 @@ def find_nc_pages(
     # Se não encontrou NC por texto, tentar páginas-imagem em UMA chamada Vision
     if not nc_groups and image_pages and pdf_path:
         print(
-            f"[Stage3] Nenhuma NC por texto. Filtrando e enviando "
-            f"páginas-imagem em uma única chamada Vision..."
+            "[Stage3] Nenhuma NC por texto. Filtrando e enviando "
+            "páginas-imagem em uma única chamada Vision..."
         )
         candidate_pages = filter_candidate_pages(
             image_pages,
@@ -461,13 +460,13 @@ def detect_nc_format(page_text: str) -> str:
     return "unknown"
 
 
-def _parse_siafi_header(text: str) -> Dict[str, Optional[str]]:
+def _parse_siafi_header(text: str) -> dict[str, str | None]:
     """
     Extrai número da NC, UG emitente e UG favorecida do cabeçalho SIAFI.
     """
-    numero_nc: Optional[str] = None
-    ug_emitente: Optional[str] = None
-    ug_favorecida: Optional[str] = None
+    numero_nc: str | None = None
+    ug_emitente: str | None = None
+    ug_favorecida: str | None = None
 
     # Normaliza para facilitar regex (acentos podem variar)
     upper = text.upper()
@@ -504,7 +503,7 @@ def _parse_siafi_header(text: str) -> Dict[str, Optional[str]]:
     return header
 
 
-def _parse_siafi_events(text: str) -> List[Dict[str, Any]]:
+def _parse_siafi_events(text: str) -> list[dict[str, Any]]:
     """
     Faz parsing da tabela de eventos do print SIAFI.
 
@@ -512,7 +511,7 @@ def _parse_siafi_events(text: str) -> List[Dict[str, Any]]:
     Linha 1: número_linha (3 dígitos), evento (6 dígitos), valor (R$)
     Linha 2: esfera, ptres, fonte, nd, ugr, pi.
     """
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     lines = text.splitlines()
 
     line1_re = re.compile(
@@ -558,7 +557,7 @@ def _parse_siafi_events(text: str) -> List[Dict[str, Any]]:
         i += 1
 
     # Deduplicação por ND: mantém apenas o evento mais recente (maior número)
-    nd_map: Dict[str, Dict[str, Any]] = {}
+    nd_map: dict[str, dict[str, Any]] = {}
     for ev in events:
         nd = ev.get("nd")
         if not nd:
@@ -570,7 +569,7 @@ def _parse_siafi_events(text: str) -> List[Dict[str, Any]]:
     return deduped
 
 
-def _parse_web_header(text: str, nup_id: str = "") -> Dict[str, Optional[str]]:
+def _parse_web_header(text: str, nup_id: str = "") -> dict[str, str | None]:
     """Extrai número da NC e UG emitente do cabeçalho Web (wrapper que loga)."""
     result = _parse_web_header_impl(text)
     print(
@@ -580,12 +579,12 @@ def _parse_web_header(text: str, nup_id: str = "") -> Dict[str, Optional[str]]:
     return result
 
 
-def _parse_web_header_impl(text: str) -> Dict[str, Optional[str]]:
+def _parse_web_header_impl(text: str) -> dict[str, str | None]:
     """
     Extrai número da NC e UG emitente do cabeçalho Web.
     """
-    ug_emitente: Optional[str] = None
-    numero_nc: Optional[str] = None
+    ug_emitente: str | None = None
+    numero_nc: str | None = None
 
     m_ug_line = re.search(
         r"UG\s+Emitente[^\n]*\n([ \t]*)(\d{6})",
@@ -623,11 +622,11 @@ def _parse_web_header_impl(text: str) -> Dict[str, Optional[str]]:
     }
 
 
-def _parse_web_destinos(text: str, nup_id: str = "") -> List[Dict[str, Any]]:
+def _parse_web_destinos(text: str, nup_id: str = "") -> list[dict[str, Any]]:
     """
     Extrai destinos (NDs) da tabela 'Destino do Crédito' / 'Célula Orçamentária'.
     """
-    destinos: List[Dict[str, Any]] = []
+    destinos: list[dict[str, Any]] = []
 
     m_section = re.search(
         r"(?:Destino do Crédito|C[eé]lula Orçament[áa]ria)(.+?)(?:Origem do Crédito|$)",
@@ -670,7 +669,7 @@ def _parse_web_destinos(text: str, nup_id: str = "") -> List[Dict[str, Any]]:
     return destinos
 
 
-def _extract_with_ai(text: str) -> Dict[str, Any]:
+def _extract_with_ai(text: str) -> dict[str, Any]:
     """
     Usa Gemini com STAGE3_PROMPT para estruturar uma NC.
     """
@@ -697,9 +696,9 @@ def _extract_with_ai(text: str) -> Dict[str, Any]:
 
 def _call_gemini_vision_with_fallback(
     prompt: str,
-    images_base64: Optional[List[str]] = None,
+    images_base64: list[str] | None = None,
     nup_id: str = "",
-) -> Optional[str]:
+) -> str | None:
     """
     Chama o Gemini com prompt e opcionalmente várias imagens.
     Rate limit: 2 s antes da chamada. Em caso de 429, tenta próximo modelo.
@@ -710,7 +709,7 @@ def _call_gemini_vision_with_fallback(
         raise ValueError("GEMINI_API_KEY não definida.")
     client = genai.Client(api_key=api_key)
     time.sleep(2)  # Rate limiting
-    content_parts: List[Any] = [types.Part.from_text(text=prompt)]
+    content_parts: list[Any] = [types.Part.from_text(text=prompt)]
     if images_base64:
         for img_b64 in images_base64:
             if not img_b64:
@@ -719,7 +718,7 @@ def _call_gemini_vision_with_fallback(
             content_parts.append(
                 types.Part.from_bytes(data=img_bytes, mime_type="image/png")
             )
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for model_name in MODELS_FALLBACK:
         try:
             response = client.models.generate_content(
@@ -733,7 +732,7 @@ def _call_gemini_vision_with_fallback(
             text = (response.text or "").strip()
             if text:
                 return text
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last_error = exc
             if "429" in str(exc):
                 print(
@@ -751,16 +750,16 @@ def _call_gemini_vision_with_fallback(
 
 def extract_ncs_from_images_batch(
     pdf_path: str,
-    candidate_page_numbers: List[int],
+    candidate_page_numbers: list[int],
     nup_id: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Envia TODAS as imagens candidatas numa única chamada ao Gemini.
     Retorna lista de grupos no formato nc_groups (pages, format, data, method).
     """
     if not candidate_page_numbers:
         return []
-    images_b64: List[str] = []
+    images_b64: list[str] = []
     for page_num in candidate_page_numbers:
         img_b64 = page_to_base64(pdf_path, page_num)
         if img_b64:
@@ -791,7 +790,7 @@ def extract_ncs_from_images_batch(
                 lines = lines[:-1]
             text = "\n".join(lines)
         data = json.loads(text)
-    except json.JSONDecodeError as exc:  # noqa: BLE001
+    except json.JSONDecodeError as exc:
         logger.warning("Resposta Vision não é JSON válido: %s", exc)
         print(f"[Stage3][{nup_id}] Resposta Vision inválida: {exc}", flush=True)
         return []
@@ -800,7 +799,7 @@ def extract_ncs_from_images_batch(
     if not ncs_list or ncs_found == 0:
         print(f"[Stage3][{nup_id}] Nenhuma NC encontrada nas imagens", flush=True)
         return []
-    nc_groups: List[Dict[str, Any]] = []
+    nc_groups: list[dict[str, Any]] = []
     for nc in ncs_list:
         if not isinstance(nc, dict):
             continue
@@ -822,12 +821,12 @@ def extract_ncs_from_images_batch(
 
 
 def filter_candidate_pages(
-    image_pages: List[int],
-    all_pages: Dict[str, str],
-    exclude_pages: Optional[List[int]] = None,
+    image_pages: list[int],
+    all_pages: dict[str, str],
+    exclude_pages: list[int] | None = None,
     total_pages: int = 0,
     nup_id: str = "",
-) -> List[int]:
+) -> list[int]:
     """
     Filtra páginas-imagem ANTES de enviar ao Gemini: descarta as que
     claramente não são NC (certidões, despachos, requisição, início/fim do doc).
@@ -847,7 +846,7 @@ def filter_candidate_pages(
         r"negativa\s+de\s+debitos",
     ]
     pattern = re.compile("|".join(discard_patterns), re.IGNORECASE)
-    filtered: List[int] = []
+    filtered: list[int] = []
     for page_num in image_pages:
         if page_num in exclude_set:
             continue
@@ -865,7 +864,7 @@ def filter_candidate_pages(
     return filtered
 
 
-def extract_nc_web(text: str, nup_id: str = "") -> Dict[str, Any]:
+def extract_nc_web(text: str, nup_id: str = "") -> dict[str, Any]:
     """
     Extrai campos de NC em formato web (modelos 1 e 4).
 
@@ -878,7 +877,7 @@ def extract_nc_web(text: str, nup_id: str = "") -> Dict[str, Any]:
         # Fallback completo para IA
         return _extract_with_ai(text)
 
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "numero_nc": header.get("numero_nc"),
         "ug_emitente": header.get("ug_emitente"),
         "destinos": destinos,
@@ -889,7 +888,7 @@ def extract_nc_web(text: str, nup_id: str = "") -> Dict[str, Any]:
     return data
 
 
-def extract_nc_siafi(text: str, nup_id: str = "") -> Dict[str, Any]:
+def extract_nc_siafi(text: str, nup_id: str = "") -> dict[str, Any]:
     """
     Extrai campos de NC em formato SIAFI (modelos 2 e 3).
 
@@ -903,7 +902,7 @@ def extract_nc_siafi(text: str, nup_id: str = "") -> Dict[str, Any]:
         # Fallback completo para IA
         return _extract_with_ai(text)
 
-    destinos: List[Dict[str, Any]] = []
+    destinos: list[dict[str, Any]] = []
     for ev in events:
         destinos.append(
             {
@@ -918,7 +917,7 @@ def extract_nc_siafi(text: str, nup_id: str = "") -> Dict[str, Any]:
             }
         )
 
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "numero_nc": header.get("numero_nc"),
         "ug_emitente": header.get("ug_emitente"),
         "destinos": destinos,
@@ -930,9 +929,9 @@ def extract_nc_siafi(text: str, nup_id: str = "") -> Dict[str, Any]:
 
 
 def extract_nc_from_requisition(
-    all_pages: Dict[str, str],
-    req_pages: List[int],
-) -> Dict[str, Any]:
+    all_pages: dict[str, str],
+    req_pages: list[int],
+) -> dict[str, Any]:
     """
     Fallback: extrai dados parciais do Tópico 2 da requisição.
     Busca por PTRES, ND, Fonte, etc.
@@ -940,14 +939,14 @@ def extract_nc_from_requisition(
     if not req_pages:
         return {}
 
-    textos: List[str] = []
+    textos: list[str] = []
     for page_num in req_pages:
         key = f"pagina_{page_num}"
         textos.append(all_pages.get(key, "") or "")
     text = "\n".join(textos)
     upper = text.upper()
 
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
 
     m_ptres = re.search(r"PTRES\s*[:\-]?\s*(\d{4,6})", upper)
     if m_ptres:
@@ -973,14 +972,14 @@ def extract_nc_from_requisition(
     return data
 
 
-def merge_nc_data(nc_data: Dict[str, Any], req_data: Dict[str, Any]) -> Tuple[Dict[str, Any], bool, List[str]]:
+def merge_nc_data(nc_data: dict[str, Any], req_data: dict[str, Any]) -> tuple[dict[str, Any], bool, list[str]]:
     """
     Mescla dados da NC (extração principal) com dados da requisição.
     - Dados da NC têm prioridade.
     - Campos nulos na NC podem ser preenchidos com dados da requisição.
     Retorna (dados_mesclados, complementado, campos_faltantes).
     """
-    merged: Dict[str, Any] = dict(nc_data or {})
+    merged: dict[str, Any] = dict(nc_data or {})
     complementado = False
 
     for key in ("numero_nc", "ug_emitente"):
@@ -989,7 +988,7 @@ def merge_nc_data(nc_data: Dict[str, Any], req_data: Dict[str, Any]) -> Tuple[Di
             complementado = True
 
     destinos_raw = merged.get("destinos") or []
-    destinos: List[Dict[str, Any]] = []
+    destinos: list[dict[str, Any]] = []
     for d in destinos_raw:
         if not isinstance(d, dict):
             continue
@@ -1010,7 +1009,7 @@ def merge_nc_data(nc_data: Dict[str, Any], req_data: Dict[str, Any]) -> Tuple[Di
                 total_dec += v
         merged["valor_total"] = float(total_dec)
 
-    campos_faltantes: List[str] = []
+    campos_faltantes: list[str] = []
     topo_expected = ["numero_nc", "ug_emitente", "valor_total"]
     for key in topo_expected:
         if not merged.get(key):
@@ -1025,13 +1024,13 @@ def merge_nc_data(nc_data: Dict[str, Any], req_data: Dict[str, Any]) -> Tuple[Di
 
 
 def run(
-    all_pages: Dict[str, str],
-    req_pages: Optional[List[int]] = None,
-    pdf_path: Optional[str] = None,
-    image_pages: Optional[List[int]] = None,
+    all_pages: dict[str, str],
+    req_pages: list[int] | None = None,
+    pdf_path: str | None = None,
+    image_pages: list[int] | None = None,
     total_pages: int = 0,
     nup_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Executa o Estágio 3 usando todas as páginas extraídas.
 
@@ -1062,12 +1061,12 @@ def run(
 
     req_data = extract_nc_from_requisition(all_pages, req_pages_list) if req_pages_list else {}
 
-    ncs: List[Stage3NC] = []
+    ncs: list[Stage3NC] = []
 
     for group in nc_groups:
-        group_pages: List[int] = group["pages"]
+        group_pages: list[int] = group["pages"]
         fmt = group.get("format") or "unknown"
-        nc_raw: Optional[Dict[str, Any]] = None
+        nc_raw: dict[str, Any] | None = None
 
         if group.get("method") == "gemini_vision" and group.get("data"):
             nc_raw = group["data"]
@@ -1154,7 +1153,7 @@ def run(
         ug_emitente = merged.get("ug_emitente")
 
         destinos_raw = merged.get("destinos") or []
-        destinos: List[Stage3Destination] = []
+        destinos: list[Stage3Destination] = []
         for d in destinos_raw:
             if not isinstance(d, dict):
                 continue

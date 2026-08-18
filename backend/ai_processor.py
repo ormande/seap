@@ -11,7 +11,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
@@ -40,85 +40,85 @@ CANDIDATE_MODELS = [
 
 
 class RequisitionItemOutput(BaseModel):
-    item: Optional[int] = Field(
+    item: int | None = Field(
         None, description="Número sequencial do item na requisição (ex: 1, 2, 3...)"
     )
-    catmat: Optional[str] = Field(
+    catmat: str | None = Field(
         None, description="Código CatMat ou CatSer do material/serviço (ex: 150234)"
     )
     descricao: str = Field(
         ..., description="Descrição completa e detalhada do material ou serviço"
     )
-    unidade: Optional[str] = Field(
+    unidade: str | None = Field(
         None, description="Unidade de fornecimento (ex: UND, UN, CX, PCT, KG, SV, RESMA, FRASCO)"
     )
-    quantidade: Optional[float] = Field(
+    quantidade: float | None = Field(
         None, description="Quantidade requisitada (numérica)"
     )
-    valor_unitario: Optional[float] = Field(
+    valor_unitario: float | None = Field(
         None, description="Valor unitário do item em Reais (R$)"
     )
-    valor_total: Optional[float] = Field(
+    valor_total: float | None = Field(
         None, description="Valor total do item (quantidade * valor_unitario)"
     )
-    nd_subelemento: Optional[str] = Field(
+    nd_subelemento: str | None = Field(
         None,
         description="Natureza de Despesa / Subelemento se informado na linha (ex: 33.90.30.24 ou 30/24)",
     )
 
 
 class RequisitionTableOutput(BaseModel):
-    fornecedor: Optional[str] = Field(
+    fornecedor: str | None = Field(
         None, description="Razão Social ou Nome do Fornecedor / Empresa vencedora"
     )
-    cnpj: Optional[str] = Field(
+    cnpj: str | None = Field(
         None, description="CNPJ do Fornecedor formatado (00.000.000/0000-00) ou numérico"
     )
-    valor_total_geral: Optional[float] = Field(
+    valor_total_geral: float | None = Field(
         None, description="Valor total geral da requisição / somatório dos itens"
     )
-    tipo_empenho: Optional[str] = Field(
+    tipo_empenho: str | None = Field(
         None, description="Tipo de empenho selecionado: ORDINARIO, GLOBAL ou ESTIMATIVO"
     )
-    itens: List[RequisitionItemOutput] = Field(
+    itens: list[RequisitionItemOutput] = Field(
         default_factory=list, description="Lista de itens extraídos da tabela de materiais/serviços"
     )
 
 
 class HeaderOutput(BaseModel):
-    numero_processo: Optional[str] = Field(None, description="NUP / Número do Processo (ex: 64136.000532/2026-31)")
-    uasg: Optional[str] = Field(None, description="Código UASG de 6 dígitos (ex: 160136)")
-    orgao: Optional[str] = Field(None, description="Nome da Organização Militar / Unidade requisitante")
-    modalidade: Optional[str] = Field(None, description="Modalidade da licitação (ex: Pregão Eletrônico, Dispensa, Inexigibilidade)")
-    objeto: Optional[str] = Field(None, description="Descrição resumida do objeto da aquisição")
-    data: Optional[str] = Field(None, description="Data do documento no formato ISO YYYY-MM-DD quando disponível")
+    numero_processo: str | None = Field(None, description="NUP / Número do Processo (ex: 64136.000532/2026-31)")
+    uasg: str | None = Field(None, description="Código UASG de 6 dígitos (ex: 160136)")
+    orgao: str | None = Field(None, description="Nome da Organização Militar / Unidade requisitante")
+    modalidade: str | None = Field(None, description="Modalidade da licitação (ex: Pregão Eletrônico, Dispensa, Inexigibilidade)")
+    objeto: str | None = Field(None, description="Descrição resumida do objeto da aquisição")
+    data: str | None = Field(None, description="Data do documento no formato ISO YYYY-MM-DD quando disponível")
 
 
 class SupplierOutput(BaseModel):
-    cnpj: Optional[str] = Field(None, description="CNPJ formatado do fornecedor")
-    razao_social: Optional[str] = Field(None, description="Razão social da empresa")
-    nome_fantasia: Optional[str] = Field(None, description="Nome fantasia")
-    endereco: Optional[str] = Field(None, description="Logradouro e número")
-    municipio: Optional[str] = Field(None, description="Cidade")
-    uf: Optional[str] = Field(None, description="Sigla do estado (ex: MS, SP)")
+    cnpj: str | None = Field(None, description="CNPJ formatado do fornecedor")
+    razao_social: str | None = Field(None, description="Razão social da empresa")
+    nome_fantasia: str | None = Field(None, description="Nome fantasia")
+    endereco: str | None = Field(None, description="Logradouro e número")
+    municipio: str | None = Field(None, description="Cidade")
+    uf: str | None = Field(None, description="Sigla do estado (ex: MS, SP)")
 
 
 class DispatchOutput(BaseModel):
     resumo: str = Field(..., description="Resumo sucinto do despacho em 1 a 2 frases")
     status: str = Field(..., description="Exatamente um de: 'aprovado', 'pendente', 'com_ressalvas'")
-    problemas_identificados: List[str] = Field(default_factory=list, description="Problemas ou irregularidades apontados")
-    acoes_necessarias: List[str] = Field(default_factory=list, description="Ações recomendadas para saneamento")
+    problemas_identificados: list[str] = Field(default_factory=list, description="Problemas ou irregularidades apontados")
+    acoes_necessarias: list[str] = Field(default_factory=list, description="Ações recomendadas para saneamento")
 
 
 class NDClassificationOutput(BaseModel):
-    subelemento: Optional[str] = Field(None, description="Código ou nome do subelemento mais adequado")
-    codigo_nd: Optional[str] = Field(None, description="Código da ND (ex: 3.3.90.30)")
+    subelemento: str | None = Field(None, description="Código ou nome do subelemento mais adequado")
+    codigo_nd: str | None = Field(None, description="Código da ND (ex: 3.3.90.30)")
     confianca: str = Field(default="media", description="'alta', 'media' ou 'baixa'")
 
 
 class VerificationOutput(BaseModel):
     score_confianca: float = Field(..., description="Score de 0.0 a 1.0 indicando conformidade da extração")
-    correcoes: List[Dict[str, Any]] = Field(default_factory=list, description="Correções sugeridas")
+    correcoes: list[dict[str, Any]] = Field(default_factory=list, description="Correções sugeridas")
 
 
 # --- Prompts Especializados do Exército Brasileiro ---
@@ -195,14 +195,14 @@ class GeminiProcessor:
         self,
         contents: Any,
         schema: Any = None,
-        system_instruction: Optional[str] = None,
+        system_instruction: str | None = None,
         temperature: float = 0.1,
     ) -> Any:
         """Tenta a chamada no modelo prioritário e faz fallback automático se o modelo estiver indisponível."""
         last_err = None
         for model_name in CANDIDATE_MODELS:
             try:
-                config_kwargs: Dict[str, Any] = {
+                config_kwargs: dict[str, Any] = {
                     "temperature": temperature,
                 }
                 if schema is not None:
@@ -268,11 +268,11 @@ class GeminiProcessor:
         prompt: str,
         images_base64: list[str],
         schema: Any = None,
-        system_instruction: Optional[str] = None,
+        system_instruction: str | None = None,
         operation: str = "vision",
     ) -> tuple[dict[str, Any], int, int]:
         """Envia imagens em alta resolução + prompt diretamente ao Gemini Multimodal."""
-        content_parts: List[Any] = [types.Part.from_text(text=prompt)]
+        content_parts: list[Any] = [types.Part.from_text(text=prompt)]
         for b64 in images_base64:
             if not b64:
                 continue

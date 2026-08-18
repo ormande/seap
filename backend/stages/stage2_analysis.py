@@ -10,16 +10,14 @@ Responsável por:
 
 from __future__ import annotations
 
-import logging
 import json
-import os
+import logging
 import re
-import sys
 import traceback
 import unicodedata
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 try:
     from ..ai_processor import GeminiProcessor
@@ -33,15 +31,16 @@ except ImportError:
 
 try:
     from extractor import get_pages_with_large_images, page_to_base64
-except Exception as e1:
+except Exception:
     try:
         from ..extractor import get_pages_with_large_images, page_to_base64
-    except Exception as e2:
+    except Exception:
         get_pages_with_large_images = None  # type: ignore[assignment]
         page_to_base64 = None  # type: ignore[assignment]
 
 try:
     from ..models import (
+        Stage2CNPJDetails,
         Stage2Confidence,
         Stage2Data,
         Stage2Divergencia,
@@ -52,13 +51,13 @@ try:
         Stage2NDVerificationItem,
         Stage2Result,
         Stage2TipoEmpenho,
-        Stage2CNPJDetails,
         Stage2UASG,
         Stage2UASGDetails,
         Stage2VerificacaoCalculos,
     )
 except ImportError:
     from models import (
+        Stage2CNPJDetails,
         Stage2Confidence,
         Stage2Data,
         Stage2Divergencia,
@@ -69,7 +68,6 @@ except ImportError:
         Stage2NDVerificationItem,
         Stage2Result,
         Stage2TipoEmpenho,
-        Stage2CNPJDetails,
         Stage2UASG,
         Stage2UASGDetails,
         Stage2VerificacaoCalculos,
@@ -126,11 +124,11 @@ INSTRUMENTO_PREGao_CURTO_REGEX = re.compile(
 )
 
 # Fallback quando o cache (banco) ainda não tiver a UASG.
-UASG_TO_OM: Dict[str, str] = {}
+UASG_TO_OM: dict[str, str] = {}
 
 # Seed local mínimo de UASGs (9ª RM) para uso seguro em testes e runtimes
 # que ainda não executaram o startup da API (carregamento do cache/banco).
-_UASG_SEED_FALLBACK_9RM: Dict[str, str] = {
+_UASG_SEED_FALLBACK_9RM: dict[str, str] = {
     "160078": "Colégio Militar de Campo Grande",
     "160095": "58º Batalhão de Infantaria Motorizado",
     "160131": "17º Regimento de Cavalaria Mecanizado",
@@ -311,7 +309,7 @@ def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _normalize_supplier_name(value: Any) -> Optional[str]:
+def _normalize_supplier_name(value: Any) -> str | None:
     """
     Normaliza o nome do fornecedor para exibição/persistência consistente.
 
@@ -387,7 +385,7 @@ def normalize_instrument_year(numero: str) -> str:
     return numero
 
 
-def _safe_decimal(value: Any) -> Optional[Decimal]:
+def _safe_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     if isinstance(value, (int, float, Decimal)):
@@ -408,7 +406,7 @@ def _safe_decimal(value: Any) -> Optional[Decimal]:
     return None
 
 
-def _normalize_cnpj(value: Any) -> Optional[str]:
+def _normalize_cnpj(value: Any) -> str | None:
     """
     Normaliza um possível CNPJ, garantindo que não seja confundido com NUP.
     Formato final: XX.XXX.XXX/XXXX-XX (14 dígitos).
@@ -434,8 +432,8 @@ def _normalize_cnpj(value: Any) -> Optional[str]:
 def extract_cnpj_candidates(
     text: str,
     section: str = "requisicao",
-    page_scope: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    page_scope: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Gera candidatos de CNPJ a partir do texto da requisição, sem usar IA.
 
@@ -450,14 +448,14 @@ def extract_cnpj_candidates(
     - reasons: lista de strings (evidências)
     """
     full_text = text or ""
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
 
     def _base_candidate(
         value_raw: str,
         source: str,
-        match_span: Tuple[int, int],
-        extra_reason: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        match_span: tuple[int, int],
+        extra_reason: str | None = None,
+    ) -> dict[str, Any]:
         start, end = match_span
         matched_text = full_text[start:end]
         window_start = max(0, start - 120)
@@ -467,7 +465,7 @@ def extract_cnpj_candidates(
         digits = re.sub(r"\D", "", value_raw)
         formatted = _normalize_cnpj(digits)
 
-        cand: Dict[str, Any] = {
+        cand: dict[str, Any] = {
             "value": digits if digits else None,
             "formatted_value": formatted,
             "score": 0.0,
@@ -531,7 +529,7 @@ def extract_cnpj_candidates(
     offset = 0
     for line in lines:
         line_start = offset
-        line_end = offset + len(line)
+        offset + len(line)
         offset += len(line) + 1
         line_lower = line.lower()
         if not any(tok in line_lower for tok in context_tokens):
@@ -556,8 +554,8 @@ def extract_cnpj_candidates(
 
 
 def resolve_cnpj(
-    candidates: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Resolve o melhor CNPJ a partir da lista de candidatos.
 
@@ -665,14 +663,14 @@ def resolve_cnpj(
         cand["reasons"] = reasons
 
     # Agregar consenso por valor formatado.
-    by_value: Dict[str, List[Dict[str, Any]]] = {}
+    by_value: dict[str, list[dict[str, Any]]] = {}
     for cand in candidates:
         formatted = str(cand.get("formatted_value") or "").strip()
         if not formatted:
             continue
         by_value.setdefault(formatted, []).append(cand)
 
-    for _, group in by_value.items():
+    for group in by_value.values():
         if len(group) >= 2:
             for cand in group:
                 cand["score"] = float(cand.get("score", 0.0)) + 15.0
@@ -696,7 +694,7 @@ def resolve_cnpj(
             "reason": "Candidatos de CNPJ encontrados, mas todos com score muito baixo, contexto duvidoso ou dígitos inválidos.",
         }
 
-    reason_parts: List[str] = best.get("reasons", []) or ["Melhor score entre candidatos de CNPJ."]
+    reason_parts: list[str] = best.get("reasons", []) or ["Melhor score entre candidatos de CNPJ."]
 
     return {
         "value": re.sub(r"\D", "", str(best.get("value") or "")) or None,
@@ -740,9 +738,7 @@ def _is_instrument_page(text: str) -> bool:
         return True
     if re.search(r"\bDA\s+VIG[EÊ]NCIA\b", upper):
         return True
-    if re.search(r"\bDAS\s+OBRIGA[ÇC][OÕ]ES\b", upper):
-        return True
-    return False
+    return bool(re.search(r"\bDAS\s+OBRIGA[ÇC][OÕ]ES\b", upper))
 
 
 def _is_requisition_end(text: str) -> bool:
@@ -769,17 +765,15 @@ def _is_requisition_end(text: str) -> bool:
     # Fiscal Adm ou Ch + seção/OM
     if "FISCAL ADM" in upper or re.search(r"\bCH\s+[A-Z0-9/]", upper):
         return True
-    if "ORDENADOR DE DESPESAS" in upper:
-        return True
-    return False
+    return "ORDENADOR DE DESPESAS" in upper
 
 
-def _find_requisition_pages_legacy(all_pages: Dict[str, str], nup_id: str = "") -> List[int]:
+def _find_requisition_pages_legacy(all_pages: dict[str, str], nup_id: str = "") -> list[int]:
     """
     Lógica legada: identifica páginas da requisição a partir de "Req nº" + "Assunto".
     Mantida como fallback quando a âncora do campo 6 não é encontrada.
     """
-    page_items: List[Tuple[int, str]] = []
+    page_items: list[tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
             continue
@@ -791,9 +785,9 @@ def _find_requisition_pages_legacy(all_pages: Dict[str, str], nup_id: str = "") 
 
     page_items.sort(key=lambda x: x[0])
 
-    start_page: Optional[int] = None
+    start_page: int | None = None
 
-    debug_candidates: List[Dict[str, Any]] = []
+    debug_candidates: list[dict[str, Any]] = []
 
     for idx, text in page_items:
         lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
@@ -830,7 +824,7 @@ def _find_requisition_pages_legacy(all_pages: Dict[str, str], nup_id: str = "") 
         )
         return []
 
-    requisition_pages: List[int] = [start_page]
+    requisition_pages: list[int] = [start_page]
     max_continuation = 5
     continuation_count = 0
 
@@ -843,9 +837,7 @@ def _find_requisition_pages_legacy(all_pages: Dict[str, str], nup_id: str = "") 
             return True
         if re.search(r"^\s*\d+\.", text, flags=re.MULTILINE):
             return True
-        if "Nº DA REQUISIÇÃO" in upper or "Nº REQ" in upper:
-            return True
-        return False
+        return bool("Nº DA REQUISIÇÃO" in upper or "Nº REQ" in upper)
 
     started = False
     for idx, text in page_items:
@@ -878,7 +870,7 @@ def _find_requisition_pages_legacy(all_pages: Dict[str, str], nup_id: str = "") 
     return requisition_pages
 
 
-def find_requisition_pages(all_pages: Dict[str, str], nup_id: str = "") -> List[int]:
+def find_requisition_pages(all_pages: dict[str, str], nup_id: str = "") -> list[int]:
     """
     Identifica as páginas que compõem a peça da requisição usando como âncora
     o campo 6 ("Material/Serviço a ser adquirido/contratado"), expandindo para
@@ -890,7 +882,7 @@ def find_requisition_pages(all_pages: Dict[str, str], nup_id: str = "") -> List[
     )
 
     # Organizar páginas em (numero, texto)
-    page_items: List[Tuple[int, str]] = []
+    page_items: list[tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
             continue
@@ -905,7 +897,7 @@ def find_requisition_pages(all_pages: Dict[str, str], nup_id: str = "") -> List[
         return []
 
     # 1. Encontrar página-âncora (campo 6)
-    anchor_page: Optional[int] = None
+    anchor_page: int | None = None
     for idx, text in page_items:
         if ANCHOR_CAMPO6.search(text or ""):
             anchor_page = idx
@@ -921,11 +913,11 @@ def find_requisition_pages(all_pages: Dict[str, str], nup_id: str = "") -> List[
     print(f"[Stage2][{nup_id}] Âncora campo 6 encontrada na pg {anchor_page}", flush=True)
 
     # Mapas auxiliares
-    page_map: Dict[int, str] = {idx: text for idx, text in page_items}
-    all_indices: List[int] = [idx for idx, _ in page_items]
+    page_map: dict[int, str] = {idx: text for idx, text in page_items}
+    all_indices: list[int] = [idx for idx, _ in page_items]
     anchor_pos = all_indices.index(anchor_page)
 
-    requisition_pages: List[int] = [anchor_page]
+    requisition_pages: list[int] = [anchor_page]
 
     # 2. Expandir pra trás
     STOP_BACKWARD = re.compile(
@@ -1020,14 +1012,14 @@ def _normalize_instrument_type(raw_type: str) -> str:
     return raw_type.strip()
 
 
-def extract_instrument_and_uasg(text: str, nup_id: str = "") -> Dict[str, Any]:
+def extract_instrument_and_uasg(text: str, nup_id: str = "") -> dict[str, Any]:
     """
     Extrai instrumento (tipo + número) e UASG (código + nome) do texto.
     Normalmente aparecem no primeiro parágrafo/tópico.
     Ordem: INSTRUMENTO_REGEX (tópico 1) → INSTRUMENTO_CAMPO6_REGEX (campo 6) → UASG só.
     """
-    instrumento: Dict[str, Optional[str]] = {"tipo": None, "numero": None}
-    uasg: Dict[str, Optional[str]] = {"codigo": None, "nome": None}
+    instrumento: dict[str, str | None] = {"tipo": None, "numero": None}
+    uasg: dict[str, str | None] = {"codigo": None, "nome": None}
 
     flat = _normalize_for_regex(text)
     head = flat[:4000]
@@ -1091,17 +1083,17 @@ def extract_instrument_and_uasg(text: str, nup_id: str = "") -> Dict[str, Any]:
 def extract_instrument_candidates(
     text: str,
     section: str = "requisicao",
-    page_scope: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    page_scope: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Gera candidatos de instrumento a partir do texto da requisição.
 
     Não usa IA. Baseado apenas em padrões determinísticos.
     """
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     cleaned = _normalize_for_regex(text or "")
 
-    def _base_candidate(tipo_raw: str, numero_raw: str, source: str, match_span: Tuple[int, int]) -> Dict[str, Any]:
+    def _base_candidate(tipo_raw: str, numero_raw: str, source: str, match_span: tuple[int, int]) -> dict[str, Any]:
         tipo_norm = _normalize_instrument_type(tipo_raw)
         numero_norm = normalize_instrument_year(numero_raw.strip())
         start, end = match_span
@@ -1110,7 +1102,7 @@ def extract_instrument_candidates(
         window_end = min(len(cleaned), end + 80)
         window = cleaned[window_start:window_end]
 
-        cand: Dict[str, Any] = {
+        cand: dict[str, Any] = {
             "tipo": tipo_norm,
             "numero": numero_norm,
             "score": 0.0,
@@ -1160,8 +1152,8 @@ def extract_instrument_candidates(
 
 
 def resolve_instrument(
-    candidates: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Resolve o melhor instrumento a partir da lista de candidatos.
 
@@ -1242,7 +1234,7 @@ def resolve_instrument(
         cand["reasons"] = reasons
 
     # Agregar consenso por (tipo, numero)
-    by_key: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for cand in candidates:
         tipo = str(cand.get("tipo") or "")
         numero = str(cand.get("numero") or "")
@@ -1277,7 +1269,7 @@ def resolve_instrument(
             "reason": "Candidatos de instrumento encontrados, mas todos com score muito baixo ou contexto duvidoso.",
         }
 
-    reason_parts: List[str] = best.get("reasons", [])
+    reason_parts: list[str] = best.get("reasons", [])
     if not reason_parts:
         reason_parts = ["Melhor score entre candidatos de instrumento."]
 
@@ -1292,13 +1284,13 @@ def resolve_instrument(
     }
 
 
-def extract_uasg_from_text(text: str, nup_id: str = "") -> Dict[str, Optional[str]]:
+def extract_uasg_from_text(text: str, nup_id: str = "") -> dict[str, str | None]:
     """
     Extrai apenas a UASG/UG do texto da requisição.
 
     Mantém a lógica determinística e separada da resolução de instrumento.
     """
-    uasg: Dict[str, Optional[str]] = {"codigo": None, "nome": None}
+    uasg: dict[str, str | None] = {"codigo": None, "nome": None}
     flat = _normalize_for_regex(text)
     head = flat[:4000]
 
@@ -1330,23 +1322,23 @@ def extract_uasg_from_text(text: str, nup_id: str = "") -> Dict[str, Optional[st
 def extract_uasg_candidates(
     text: str,
     section: str = "requisicao",
-    page_scope: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    page_scope: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Gera candidatos de UASG/UG gerenciadora a partir do texto da requisição,
     sem usar IA.
     """
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     full = text or ""
     flat = _normalize_for_regex(full)
 
     def _base_candidate(
         codigo: str,
-        nome_raw: Optional[str],
+        nome_raw: str | None,
         source: str,
-        match_span: Tuple[int, int],
-        extra_reason: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        match_span: tuple[int, int],
+        extra_reason: str | None = None,
+    ) -> dict[str, Any]:
         codigo_norm = (codigo or "").strip()
         nome_norm = format_om_name(_normalize_whitespace(nome_raw)) if nome_raw else None
         start, end = match_span
@@ -1355,7 +1347,7 @@ def extract_uasg_candidates(
         window_end = min(len(full), end + 120)
         window = full[window_start:window_end]
 
-        cand: Dict[str, Any] = {
+        cand: dict[str, Any] = {
             "codigo": codigo_norm,
             "nome": nome_norm,
             "score": 0.0,
@@ -1463,8 +1455,8 @@ def _uasg_name_matches(nome_banco: str, nome_textual: str) -> bool:
 
 
 def resolve_uasg(
-    candidates: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Resolve a melhor UASG/UG gerenciadora a partir da lista de candidatos.
 
@@ -1565,7 +1557,7 @@ def resolve_uasg(
         cand["reasons"] = reasons
 
     # Agregar consenso por código.
-    by_codigo: Dict[str, List[Dict[str, Any]]] = {}
+    by_codigo: dict[str, list[dict[str, Any]]] = {}
     for cand in candidates:
         codigo = str(cand.get("codigo") or "").strip()
         if not codigo:
@@ -1604,7 +1596,7 @@ def resolve_uasg(
     if not nome_final and nome_banco_best:
         nome_final = nome_banco_best
 
-    reason_parts: List[str] = best.get("reasons", []) or ["Melhor score entre candidatos de UASG/UG."]
+    reason_parts: list[str] = best.get("reasons", []) or ["Melhor score entre candidatos de UASG/UG."]
 
     # Ajuste final de coerência/divergência de nome usando o nome resolvido.
     if nome_banco_best and nome_final:
@@ -1633,15 +1625,15 @@ def resolve_uasg(
     }
 
 
-def _search_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str, Optional[str]]:
+def _search_uasg_all_pages(all_pages: dict[str, str]) -> dict[str, str | None]:
     """
     Busca UASG em todas as páginas do processo.
 
     Mantém o fallback textual para UASG sem reintroduzir resolução legada de instrumento.
     """
-    uasg: Dict[str, Optional[str]] = {"codigo": None, "nome": None}
+    uasg: dict[str, str | None] = {"codigo": None, "nome": None}
 
-    page_items: List[Tuple[int, str]] = []
+    page_items: list[tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
             continue
@@ -1661,15 +1653,15 @@ def _search_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str, Optional[str]
     return uasg
 
 
-def _search_instrument_and_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str, Any]:
+def _search_instrument_and_uasg_all_pages(all_pages: dict[str, str]) -> dict[str, Any]:
     """
     Busca instrumento (tipo + número) e UASG em TODAS as páginas do processo,
     usando regex mais abrangentes.
     """
-    instrumento: Dict[str, Optional[str]] = {"tipo": None, "numero": None}
-    uasg: Dict[str, Optional[str]] = {"codigo": None, "nome": None}
+    instrumento: dict[str, str | None] = {"tipo": None, "numero": None}
+    uasg: dict[str, str | None] = {"codigo": None, "nome": None}
 
-    patterns: List[Tuple[re.Pattern[str], str]] = [
+    patterns: list[tuple[re.Pattern[str], str]] = [
         (
             re.compile(
                 r"(Preg[aã]o\s+Eletr[oô]nico)\s*(?:n[º°o\.]|nr\.?|nº|Nº|N°)?\s*\.?\s*(\d+[/-]\d+)",
@@ -1707,7 +1699,7 @@ def _search_instrument_and_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str
         ),
     ]
 
-    page_items: List[Tuple[int, str]] = []
+    page_items: list[tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
             continue
@@ -1719,7 +1711,7 @@ def _search_instrument_and_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str
 
     page_items.sort(key=lambda x: x[0])
 
-    instrumento_page: Optional[int] = None
+    instrumento_page: int | None = None
 
     for idx, text in page_items:
         flat = _normalize_for_regex(text)
@@ -1739,7 +1731,7 @@ def _search_instrument_and_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str
         re.compile(r"UG\s*[:/\-]\s*(\d{6})", flags=re.IGNORECASE),
     ]
 
-    def _find_uasg_in_text(text: str) -> Optional[str]:
+    def _find_uasg_in_text(text: str) -> str | None:
         for rgx in uasg_patterns:
             m = rgx.search(text)
             if m:
@@ -1763,13 +1755,13 @@ def _search_instrument_and_uasg_all_pages(all_pages: Dict[str, str]) -> Dict[str
 
 
 def _fallback_instrument_and_uasg_with_ai(
-    all_pages: Dict[str, str],
-) -> Dict[str, Any]:
+    all_pages: dict[str, str],
+) -> dict[str, Any]:
     """
     Fallback curto via Gemini usando apenas as 3 primeiras páginas do processo
     para identificar instrumento e UASG.
     """
-    page_items: List[Tuple[int, str]] = []
+    page_items: list[tuple[int, str]] = []
     for key, text in all_pages.items():
         if not key.startswith("pagina_"):
             continue
@@ -1812,11 +1804,11 @@ def _fallback_instrument_and_uasg_with_ai(
     instrumento_numero = result.get("instrumento_numero")
     uasg_codigo = result.get("uasg")
 
-    instrumento: Dict[str, Optional[str]] = {
+    instrumento: dict[str, str | None] = {
         "tipo": instrumento_tipo or None,
         "numero": instrumento_numero or None,
     }
-    uasg: Dict[str, Optional[str]] = {
+    uasg: dict[str, str | None] = {
         "codigo": uasg_codigo or None,
         "nome": None,
     }
@@ -1824,7 +1816,7 @@ def _fallback_instrument_and_uasg_with_ai(
     return {"instrumento": instrumento, "uasg": uasg}
 
 
-def extract_empenho_type(text: str) -> Optional[str]:
+def extract_empenho_type(text: str) -> str | None:
     """
     Extrai o tipo de empenho (Ordinário, Estimativo, Global) do cabeçalho
     ou do tópico específico sobre tipo de empenho.
@@ -1866,7 +1858,7 @@ def extract_empenho_type(text: str) -> Optional[str]:
     return None
 
 
-def _normalize_tipo_empenho_value(raw: str) -> Optional[str]:
+def _normalize_tipo_empenho_value(raw: str) -> str | None:
     """
     Normaliza variantes textuais/ocr de tipo de empenho para valores canônicos.
     """
@@ -1896,22 +1888,22 @@ def _normalize_tipo_empenho_value(raw: str) -> Optional[str]:
 def extract_tipo_empenho_candidates(
     text: str,
     section: str = "requisicao",
-    page_scope: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    page_scope: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Gera candidatos de tipo de empenho (Ordinário, Estimativo, Global) a partir
     do texto da requisição, sem usar IA.
     """
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     full_text = text or ""
     lowered = full_text.lower()
 
     def _base_candidate(
         value_raw: str,
         source: str,
-        match_span: Tuple[int, int],
-        extra_reason: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        match_span: tuple[int, int],
+        extra_reason: str | None = None,
+    ) -> dict[str, Any]:
         value_norm = _normalize_tipo_empenho_value(value_raw)
         if not value_norm:
             return {}
@@ -1921,7 +1913,7 @@ def extract_tipo_empenho_candidates(
         window_end = min(len(full_text), end + 120)
         window = full_text[window_start:window_end]
 
-        cand: Dict[str, Any] = {
+        cand: dict[str, Any] = {
             "value": value_norm,
             "score": 0.0,
             "source": source,
@@ -2050,8 +2042,8 @@ def extract_tipo_empenho_candidates(
 
 
 def resolve_tipo_empenho(
-    candidates: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Resolve o melhor tipo de empenho a partir da lista de candidatos.
 
@@ -2139,7 +2131,7 @@ def resolve_tipo_empenho(
         cand["reasons"] = reasons
 
     # Agregar consenso por valor canônico.
-    by_value: Dict[str, List[Dict[str, Any]]] = {}
+    by_value: dict[str, list[dict[str, Any]]] = {}
     for cand in candidates:
         value = str(cand.get("value") or "")
         if not value:
@@ -2160,7 +2152,7 @@ def resolve_tipo_empenho(
 
     # Detectar conflito: outro valor canônico com score competitivo.
     ambiguous = False
-    conflict_reason: Optional[str] = None
+    conflict_reason: str | None = None
     if len(sorted_cands) > 1:
         best_value = best.get("value")
         for other in sorted_cands[1:]:
@@ -2186,7 +2178,7 @@ def resolve_tipo_empenho(
             "ambiguous": True,
         }
 
-    reason_parts: List[str] = best.get("reasons", []) or []
+    reason_parts: list[str] = best.get("reasons", []) or []
     if conflict_reason:
         reason_parts.append(conflict_reason)
     if not reason_parts:
@@ -2204,7 +2196,7 @@ def resolve_tipo_empenho(
     }
 
 
-def _normalize_catmat(value: Any) -> Optional[str]:
+def _normalize_catmat(value: Any) -> str | None:
     """
     Limpa o campo CatMat/CatServ para conter apenas números.
     """
@@ -2217,7 +2209,7 @@ def _normalize_catmat(value: Any) -> Optional[str]:
     return m.group(0)
 
 
-def _normalize_unidade(value: Any) -> Optional[str]:
+def _normalize_unidade(value: Any) -> str | None:
     """
     Unidade (UND) é texto livre. Preserva letras e símbolos.
     Ajusta casos comuns onde OCR/IA retorna 'S' em vez de 'Sv'.
@@ -2245,7 +2237,7 @@ def normalize_nd(raw: str) -> str:
     return parsed["canonical"] or raw.strip()
 
 
-def _select_best_nd_sources(raw_item: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+def _select_best_nd_sources(raw_item: dict[str, Any]) -> tuple[str | None, list[str]]:
     """
     Dado um dict bruto de item de tabela, escolhe a melhor fonte de ND/SI
     preservando o valor mais informativo possível.
@@ -2263,7 +2255,7 @@ def _select_best_nd_sources(raw_item: Dict[str, Any]) -> Tuple[Optional[str], Li
     # Campos mais prováveis provenientes da tabela de itens.
     candidate_keys = ["nd_si", "nd"]
     seen: set[str] = set()
-    candidates: List[str] = []
+    candidates: list[str] = []
     for key in candidate_keys:
         val = raw_item.get(key)
         if val is None:
@@ -2279,7 +2271,7 @@ def _select_best_nd_sources(raw_item: Dict[str, Any]) -> Tuple[Optional[str], Li
     if not candidates:
         return None, []
 
-    scored: List[Tuple[float, str]] = []
+    scored: list[tuple[float, str]] = []
     for cand in candidates:
         parsed = parse_nd_si(cand)
         score = 0.0
@@ -2309,7 +2301,7 @@ def _select_best_nd_sources(raw_item: Dict[str, Any]) -> Tuple[Optional[str], Li
     return best_raw, extras
 
 
-def _normalize_item_number(value: Any) -> Optional[int]:
+def _normalize_item_number(value: Any) -> int | None:
     """
     Normaliza o número real do item a partir da 1ª coluna da tabela.
 
@@ -2361,7 +2353,7 @@ def _fold_text(value: str) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
-def _table_row_has_item_header(row: List[str]) -> bool:
+def _table_row_has_item_header(row: list[str]) -> bool:
     joined = _fold_text(" ".join(cell.lower() for cell in row if cell).strip())
     if not joined:
         return False
@@ -2373,7 +2365,7 @@ def _table_row_has_item_header(row: List[str]) -> bool:
     )
 
 
-def _table_row_looks_like_item(row: List[str]) -> bool:
+def _table_row_looks_like_item(row: list[str]) -> bool:
     if not row:
         return False
     first = next((cell for cell in row if cell), "")
@@ -2385,7 +2377,7 @@ def _table_row_looks_like_item(row: List[str]) -> bool:
     return first_norm.upper().startswith("TOTAL")
 
 
-def _table_looks_like_item_continuation(table: List[List[str]]) -> bool:
+def _table_looks_like_item_continuation(table: list[list[str]]) -> bool:
     if not table:
         return False
     if max((len(row) for row in table), default=0) < 8:
@@ -2393,8 +2385,8 @@ def _table_looks_like_item_continuation(table: List[List[str]]) -> bool:
     return any(_table_row_looks_like_item(row) for row in table)
 
 
-def _serialize_item_table_rows(rows: List[List[str]]) -> str:
-    lines: List[str] = []
+def _serialize_item_table_rows(rows: list[list[str]]) -> str:
+    lines: list[str] = []
     for row in rows:
         normalized = [_normalize_table_cell(cell) for cell in row]
         if any(normalized):
@@ -2404,9 +2396,9 @@ def _serialize_item_table_rows(rows: List[List[str]]) -> str:
 
 def _extract_native_item_table_tsv(
     pdf_path: str | Path,
-    req_pages: List[int],
-    image_pages: Optional[List[int]] = None,
-) -> Optional[str]:
+    req_pages: list[int],
+    image_pages: list[int] | None = None,
+) -> str | None:
     """
     Extrai a tabela de itens de PDFs nativos usando a estrutura tabular real.
 
@@ -2420,7 +2412,7 @@ def _extract_native_item_table_tsv(
     if not req_pages:
         return None
 
-    serialized_blocks: List[str] = []
+    serialized_blocks: list[str] = []
     in_item_section = False
 
     try:
@@ -2450,7 +2442,7 @@ def _extract_native_item_table_tsv(
 
                     if header_idx is not None:
                         in_item_section = True
-                        table_rows: List[List[str]] = []
+                        table_rows: list[list[str]] = []
                         if header_idx > 0:
                             context_row = normalized_table[header_idx - 1]
                             context_joined = " ".join(context_row).lower()
@@ -2479,15 +2471,15 @@ def _extract_native_item_table_tsv(
     return "\n\n".join(serialized_blocks).strip() or None
 
 
-def _parse_native_item_table_hints(tsv: str) -> Dict[str, Any]:
+def _parse_native_item_table_hints(tsv: str) -> dict[str, Any]:
     """Extrai pistas determinísticas de uma TSV nativa para enriquecer o resultado da IA."""
     if not tsv:
         return {"fornecedor": None, "cnpj": None, "valor_total_geral": None, "items_by_number": {}}
 
-    fornecedor: Optional[str] = None
-    cnpj: Optional[str] = None
-    valor_total_geral: Optional[float] = None
-    items_by_number: Dict[int, Dict[str, Any]] = {}
+    fornecedor: str | None = None
+    cnpj: str | None = None
+    valor_total_geral: float | None = None
+    items_by_number: dict[int, dict[str, Any]] = {}
 
     for line in tsv.splitlines():
         stripped = line.strip()
@@ -2515,7 +2507,7 @@ def _parse_native_item_table_hints(tsv: str) -> Dict[str, Any]:
         first = cols[0] if cols else ""
         item_number = _normalize_item_number(first)
         if item_number is not None and len(cols) >= 6:
-            hint: Dict[str, Any] = {"item": item_number}
+            hint: dict[str, Any] = {"item": item_number}
             if len(cols) > 1 and cols[1]:
                 hint["catmat"] = cols[1]
             if len(cols) > 5 and cols[5]:
@@ -2560,7 +2552,7 @@ def _native_nd_is_richer(current_nd: Any, native_nd: Any) -> bool:
     return len(native) > len(current)
 
 
-def _merge_native_table_hints(result: Dict[str, Any], native_tsv: Optional[str]) -> Dict[str, Any]:
+def _merge_native_table_hints(result: dict[str, Any], native_tsv: str | None) -> dict[str, Any]:
     """
     Mescla pistas da tabela nativa estruturada ao JSON retornado pela IA.
 
@@ -2609,7 +2601,7 @@ def _merge_native_table_hints(result: Dict[str, Any], native_tsv: Optional[str])
     return result
 
 
-def _sum_stage2_items_total(items: List[Stage2Item]) -> Optional[Decimal]:
+def _sum_stage2_items_total(items: list[Stage2Item]) -> Decimal | None:
     total = Decimal("0.00")
     found = False
     for item in items or []:
@@ -2621,23 +2613,23 @@ def _sum_stage2_items_total(items: List[Stage2Item]) -> Optional[Decimal]:
     return total if found else None
 
 
-def _decimal_matches(a: Optional[Decimal], b: Optional[Decimal], tolerance: Decimal = Decimal("0.02")) -> bool:
+def _decimal_matches(a: Decimal | None, b: Decimal | None, tolerance: Decimal = Decimal("0.02")) -> bool:
     if a is None or b is None:
         return False
     return abs(a - b) <= tolerance
 
 
 def _merge_image_table_results(
-    azure_data: Dict[str, Any],
-    vision_data: Dict[str, Any],
-) -> Tuple[List[Stage2Item], Optional[str], Optional[str], Optional[float]]:
+    azure_data: dict[str, Any],
+    vision_data: dict[str, Any],
+) -> tuple[list[Stage2Item], str | None, str | None, float | None]:
     """
     Mescla resultados de tabela-imagem:
     - Azure é fonte principal da malha tabular (itemização);
     - Gemini Vision complementa campos globais/semânticos como fornecedor e total.
     """
-    azure_items: List[Stage2Item] = azure_data.get("items") or []
-    vision_items: List[Stage2Item] = vision_data.get("items") or []
+    azure_items: list[Stage2Item] = azure_data.get("items") or []
+    vision_items: list[Stage2Item] = vision_data.get("items") or []
 
     items = azure_items or vision_items
 
@@ -2656,7 +2648,7 @@ def _merge_image_table_results(
     vision_total = _safe_decimal(vision_data.get("valor_total_geral"))
     items_total = _sum_stage2_items_total(items)
 
-    chosen_total: Optional[Decimal] = None
+    chosen_total: Decimal | None = None
     if _decimal_matches(vision_total, items_total) and not _decimal_matches(azure_total, items_total):
         chosen_total = vision_total
     elif _decimal_matches(azure_total, items_total) and not _decimal_matches(vision_total, items_total):
@@ -2683,7 +2675,7 @@ def _merge_image_table_results(
     return items, fornecedor, cnpj, float(chosen_total) if chosen_total is not None else None
 
 
-def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
+def parse_nd_si(raw: str) -> dict[str, str | None]:
     """
     Faz o parse/normalização de ND/SI em um formato canônico.
 
@@ -2705,7 +2697,7 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
     """
     from typing import cast
 
-    result: Dict[str, Optional[str] | bool | str] = {
+    result: dict[str, str | None | bool] = {
         "element": None,
         "subelement": None,
         "display": None,
@@ -2718,13 +2710,13 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
     }
 
     if not raw:
-        return cast(Dict[str, Optional[str]], result)
+        return cast(dict[str, str | None], result)
 
     s = re.sub(r"\s+", "", str(raw))
     s = s.replace(",", ".")
 
-    element: Optional[str] = None
-    sub: Optional[str] = None
+    element: str | None = None
+    sub: str | None = None
 
     # 0) Prefixos específicos do tipo 33.90 ou 44.90 -> partial_prefix
     # (não promovemos a ND final). Evita capturar formatos completos como 30.07.
@@ -2736,7 +2728,7 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
         result["valid_pair"] = False
         result["is_partial"] = True
         result["parse_type"] = "partial_prefix"
-        return cast(Dict[str, Optional[str]], result)
+        return cast(dict[str, str | None], result)
 
     # 1) Formatos simples EE.SS ou EE/SS (ND/SI completa sem prefixo)
     m = re.match(r"^(\d{2})[./](\d{2})$", s)
@@ -2799,7 +2791,7 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
         # Não conseguimos nem elemento, manter valor bruto
         result["display"] = raw.strip()
         result["canonical"] = None
-        return cast(Dict[str, Optional[str]], result)
+        return cast(dict[str, str | None], result)
 
     # Validação contra a tabela oficial (ND_ELEMENTS)
     try:
@@ -2810,7 +2802,7 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
     except Exception:
         # Se por algum motivo não conseguir importar a tabela, considera válido
         result["valid"] = True
-        return cast(Dict[str, Optional[str]], result)
+        return cast(dict[str, str | None], result)
 
     nd_table = ND_ELEMENTS
     if element not in nd_table:
@@ -2819,7 +2811,7 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
         result["valid_element"] = False
         result["valid_pair"] = False
         result["is_partial"] = bool(element and not sub)
-        return cast(Dict[str, Optional[str]], result)
+        return cast(dict[str, str | None], result)
 
     # Se chegou aqui, o elemento existe na base oficial.
     valid_element = True
@@ -2838,15 +2830,15 @@ def parse_nd_si(raw: str) -> Dict[str, Optional[str]]:
     # Parcial quando temos apenas elemento ou quando viemos de formatos abreviados.
     result["is_partial"] = bool(element and not sub)
 
-    return cast(Dict[str, Optional[str]], result)
+    return cast(dict[str, str | None], result)
 
 
 def resolve_nd_candidate(
     raw_nd: str,
     descricao_item: str,
-    nd_processo: Optional[str] = None,
-    candidatos_extras: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    nd_processo: str | None = None,
+    candidatos_extras: list[str] | None = None,
+) -> dict[str, Any]:
     """
     Resolve ND/SI candidata considerando:
     - tabela oficial ND_ELEMENTS
@@ -2862,12 +2854,11 @@ def resolve_nd_candidate(
       "reason": str,
     }
     """
-    from typing import cast
 
     descricao = (descricao_item or "").lower()
     raw_nd = (raw_nd or "").strip()
 
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     seen_raw: set[str] = set()
 
     def _add_candidate(source_raw: str, reason_hint: str) -> None:
@@ -2923,13 +2914,13 @@ def resolve_nd_candidate(
         }
 
     # ND do processo (se houver), extraindo apenas o elemento
-    nd_proc_element: Optional[str] = None
+    nd_proc_element: str | None = None
     if nd_processo:
         parsed_proc = parse_nd_si(nd_processo)
         nd_proc_element = parsed_proc.get("element")
 
     # Heurística simples de compatibilidade semântica por tipo
-    def _semantic_score_for_element(element: Optional[str]) -> float:
+    def _semantic_score_for_element(element: str | None) -> float:
         if not element:
             return 0.0
         e = element
@@ -2956,7 +2947,7 @@ def resolve_nd_candidate(
         valid = bool(cand.get("valid"))
         valid_pair = bool(cand.get("valid_pair"))
         is_partial = bool(cand.get("is_partial"))
-        parse_type = str(cand.get("parse_type") or "")
+        str(cand.get("parse_type") or "")
 
         # + peso por existir na tabela oficial
         if valid:
@@ -2995,7 +2986,7 @@ def resolve_nd_candidate(
         cand["score"] = score
 
     # 4) Deduplicar candidatos por (canonical, element, subelement)
-    dedup_map: Dict[Tuple[Optional[str], Optional[str], Optional[str]], Dict[str, Any]] = {}
+    dedup_map: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
     for cand in candidates:
         key = (
             cand.get("canonical"),
@@ -3071,7 +3062,7 @@ def resolve_nd_candidate(
         }
 
     # Construir razão explicável
-    parts: List[str] = []
+    parts: list[str] = []
     if best.get("valid"):
         parts.append("par (elemento/subelemento) existe na tabela ND oficial")
     if nd_proc_element and best.get("element") == nd_proc_element:
@@ -3093,8 +3084,8 @@ def resolve_nd_candidate(
 
 
 def _parse_table_result(
-    result: Dict[str, Any],
-) -> Tuple[List[Stage2Item], Optional[str], Optional[str], Optional[Decimal]]:
+    result: dict[str, Any],
+) -> tuple[list[Stage2Item], str | None, str | None, Decimal | None]:
     """
     Parseia o dict retornado pelo Gemini (tabela de itens) em lista de
     Stage2Item, fornecedor, cnpj e valor_total_geral. Reutilizado no fluxo
@@ -3106,7 +3097,7 @@ def _parse_table_result(
 
     # ND do processo (melhor fonte disponível no estágio 2):
     # agregamos o elemento predominante entre os itens com ND válida.
-    nd_proc_elements: Dict[str, int] = {}
+    nd_proc_elements: dict[str, int] = {}
     for raw in itens_raw:
         if not isinstance(raw, dict):
             continue
@@ -3119,12 +3110,12 @@ def _parse_table_result(
             if elem:
                 nd_proc_elements[elem] = nd_proc_elements.get(elem, 0) + 1
 
-    nd_processo: Optional[str] = None
+    nd_processo: str | None = None
     if nd_proc_elements:
         # Escolhe o elemento mais frequente como ND geral do processo (apenas elemento).
         nd_processo = max(nd_proc_elements.items(), key=lambda kv: kv[1])[0]
 
-    items: List[Stage2Item] = []
+    items: list[Stage2Item] = []
     for raw in itens_raw:
         if not isinstance(raw, dict):
             continue
@@ -3195,12 +3186,12 @@ def _parse_table_result(
 
 
 def extract_items_table(
-    pages_text: List[str],
+    pages_text: list[str],
     pdf_path: str | Path | None = None,
-    req_pages: List[int] | None = None,
-    image_pages: List[int] | None = None,
+    req_pages: list[int] | None = None,
+    image_pages: list[int] | None = None,
     nup_id: str = "",
-) -> Tuple[List[Stage2Item], bool, Optional[float], Optional[str], Optional[str]]:
+) -> tuple[list[Stage2Item], bool, float | None, str | None, str | None]:
     """
     Extrai a tabela de itens da requisição.
 
@@ -3213,8 +3204,8 @@ def extract_items_table(
     combined = "\n\n".join(pages_text or []).strip()
     req_pages = req_pages or []
     image_pages = image_pages or []
-    images_b64: List[str] = []
-    native_table_tsv: Optional[str] = None
+    images_b64: list[str] = []
+    native_table_tsv: str | None = None
     if pdf_path and req_pages:
         for page_num in req_pages:
             if page_num in image_pages:
@@ -3238,10 +3229,10 @@ def extract_items_table(
         logger.warning("Gemini indisponível para extração de tabela no estágio 2: %s", exc)
         return [], False, None, None, None
 
-    items: List[Stage2Item] = []
-    fornecedor: Optional[str] = None
-    cnpj: Optional[str] = None
-    valor_total_geral: Optional[Decimal] = None
+    items: list[Stage2Item] = []
+    fornecedor: str | None = None
+    cnpj: str | None = None
+    valor_total_geral: Decimal | None = None
 
     # 1. Extração base por tabela nativa estruturada, quando disponível.
     if native_table_tsv:
@@ -3289,7 +3280,7 @@ def extract_items_table(
     if not items or len(items) == 0:
         print(f"[Stage2][{nup_id}] 0 itens na tentativa base (nativo/texto) → acionando Gemini Multimodal Vision", flush=True)
         if pdf_path and req_pages and page_to_base64:
-            fallback_images: List[str] = []
+            fallback_images: list[str] = []
             for p in req_pages:
                 try:
                     img = page_to_base64(pdf_path, p)
@@ -3326,15 +3317,15 @@ def extract_items_table(
 
 
 def verify_calculations(
-    items: List[Stage2Item],
-    valor_total_documento: Optional[float],
+    items: list[Stage2Item],
+    valor_total_documento: float | None,
 ) -> Stage2VerificacaoCalculos:
     """
     Verificação matemática com exatidão absoluta (sem tolerância):
     - Confere se QTD × V.UNT == V.TOTAL por item (qualquer divergência de centavos é apontada).
     - Confere se soma dos V.TOTAL == valor total da requisição (quando informado).
     """
-    divergencias: List[Stage2Divergencia] = []
+    divergencias: list[Stage2Divergencia] = []
     total_calc = Decimal("0.00")
 
     for item in items:
@@ -3383,7 +3374,7 @@ def verify_calculations(
     )
 
 
-def structure_with_ai(requisition_text: str) -> Dict[str, Any]:
+def structure_with_ai(requisition_text: str) -> dict[str, Any]:
     """
     Fallback geral: envia todo o texto da requisição ao Gemini para
     extração dos campos principais (instrumento, UASG, tipo de empenho,
@@ -3411,11 +3402,11 @@ def structure_with_ai(requisition_text: str) -> Dict[str, Any]:
 
 def _compute_confidence(
     data: Stage2Data,
-    ai_conf: Optional[int] = None,
-    instrument_conf_override: Optional[int] = None,
-    tipo_empenho_conf_override: Optional[int] = None,
-    uasg_conf_override: Optional[int] = None,
-    cnpj_conf_override: Optional[int] = None,
+    ai_conf: int | None = None,
+    instrument_conf_override: int | None = None,
+    tipo_empenho_conf_override: int | None = None,
+    uasg_conf_override: int | None = None,
+    cnpj_conf_override: int | None = None,
 ) -> Stage2Confidence:
     """
     Gera scores de confiança heurísticos por campo e geral.
@@ -3492,7 +3483,7 @@ def _compute_confidence(
         itens_conf,
     ]
     valid = [s for s in scores if s > 0]
-    geral = int(round(sum(valid) / len(valid))) if valid else (ai_conf or 0)
+    geral = round(sum(valid) / len(valid)) if valid else (ai_conf or 0)
 
     return Stage2Confidence(
         instrumento=inst_conf,
@@ -3506,7 +3497,7 @@ def _compute_confidence(
     )
 
 
-def compute_nd_req_from_items(items: List[Stage2Item]) -> Optional[str]:
+def compute_nd_req_from_items(items: list[Stage2Item]) -> str | None:
     """
     Calcula a ND agregada da requisição de forma determinística e segura.
 
@@ -3520,7 +3511,7 @@ def compute_nd_req_from_items(items: List[Stage2Item]) -> Optional[str]:
     if not items:
         return None
 
-    canonicals: List[str] = [it.nd_si for it in items if it.nd_si]
+    canonicals: list[str] = [it.nd_si for it in items if it.nd_si]
     if not canonicals:
         return None
 
@@ -3532,7 +3523,7 @@ def compute_nd_req_from_items(items: List[Stage2Item]) -> Optional[str]:
     return None
 
 
-def _build_nd_verification_context(items: List[Stage2Item]) -> Dict[str, Any]:
+def _build_nd_verification_context(items: list[Stage2Item]) -> dict[str, Any]:
     """Monta contexto enxuto da tabela oficial de ND para a verificação semântica."""
     try:
         from ..nd_database import ND_ELEMENTS  # type: ignore[import]
@@ -3548,7 +3539,7 @@ def _build_nd_verification_context(items: List[Stage2Item]) -> Dict[str, Any]:
         - {""}
     )
 
-    nd_reference: Dict[str, Any] = {}
+    nd_reference: dict[str, Any] = {}
     for element in elements_needed:
         info = ND_ELEMENTS.get(element) or {}
         nd_reference[element] = {
@@ -3557,7 +3548,7 @@ def _build_nd_verification_context(items: List[Stage2Item]) -> Dict[str, Any]:
             "subelementos": info.get("subelementos") or {},
         }
 
-    items_payload: List[Dict[str, Any]] = []
+    items_payload: list[dict[str, Any]] = []
     for item in items:
         nd_display = item.nd_si_display or item.nd_si_raw or item.nd_si
         if not nd_display:
@@ -3607,7 +3598,7 @@ Retorne APENAS JSON válido neste formato:
 """.strip()
 
 
-def verify_nd_with_ai(items: List[Stage2Item]) -> Optional[Stage2NDVerification]:
+def verify_nd_with_ai(items: list[Stage2Item]) -> Stage2NDVerification | None:
     """
     Verifica semanticamente, com IA, se a ND/SI de cada item condiz com a
     descrição e com a tabela oficial de ND.
@@ -3642,7 +3633,7 @@ def verify_nd_with_ai(items: List[Stage2Item]) -> Optional[Stage2NDVerification]
         return None
 
     itens_result = result.get("itens") or []
-    verification_items: List[Stage2NDVerificationItem] = []
+    verification_items: list[Stage2NDVerificationItem] = []
     for item_raw in itens_result:
         if not isinstance(item_raw, dict):
             continue
@@ -3727,7 +3718,7 @@ MASK_OM_ABBREVIATIONS = {
 }
 
 
-def _format_mask_date(day: int, month: int, year: int) -> Optional[str]:
+def _format_mask_date(day: int, month: int, year: int) -> str | None:
     if not (1 <= day <= 31 and 1 <= month <= 12):
         return None
     year_short = year % 100
@@ -3737,7 +3728,7 @@ def _format_mask_date(day: int, month: int, year: int) -> Optional[str]:
     return f"{day:02d} {month_token} {year_short:02d}"
 
 
-def _format_budget_nd_display(nd: Optional[str]) -> Optional[str]:
+def _format_budget_nd_display(nd: str | None) -> str | None:
     if not nd:
         return None
     digits = re.sub(r"\D", "", str(nd))
@@ -3752,7 +3743,7 @@ def _format_budget_nd_display(nd: Optional[str]) -> Optional[str]:
     return None
 
 
-def _normalize_mask_date(raw: Any) -> Optional[str]:
+def _normalize_mask_date(raw: Any) -> str | None:
     if raw is None:
         return None
     text = _normalize_whitespace(str(raw))
@@ -3793,9 +3784,9 @@ def _normalize_mask_date(raw: Any) -> Optional[str]:
     return None
 
 
-def _extract_mask_budget_fields(text: str) -> Dict[str, Optional[str]]:
+def _extract_mask_budget_fields(text: str) -> dict[str, str | None]:
     normalized = _normalize_for_regex(text)
-    fields: Dict[str, Optional[str]] = {
+    fields: dict[str, str | None] = {
         "nc": None,
         "data": None,
         "orgao_emissor": None,
@@ -3840,8 +3831,8 @@ def _extract_mask_budget_fields(text: str) -> Dict[str, Optional[str]]:
     return fields
 
 
-def _resolve_mask_nd(mask_budget: Dict[str, Optional[str]], nd_req: Optional[str]) -> Tuple[Optional[str], List[str]]:
-    warnings: List[str] = []
+def _resolve_mask_nd(mask_budget: dict[str, str | None], nd_req: str | None) -> tuple[str | None, list[str]]:
+    warnings: list[str] = []
     nd_budget = (mask_budget.get("nd_orcamentaria") or "").strip() or None
     nd_from_items = None
     element = None
@@ -3865,7 +3856,7 @@ def _resolve_mask_nd(mask_budget: Dict[str, Optional[str]], nd_req: Optional[str
     return None, warnings
 
 
-def _infer_mask_uasg_role(text: str) -> Optional[str]:
+def _infer_mask_uasg_role(text: str) -> str | None:
     lowered = _normalize_for_regex(text).lower()
     if any(token in lowered for token in ["carona", "(car)", " car)"]):
         return "CAR"
@@ -3905,7 +3896,7 @@ def _infer_mask_uasg_role(text: str) -> Optional[str]:
     return None
 
 
-def _instrument_mask_label(tipo: Optional[str]) -> Optional[str]:
+def _instrument_mask_label(tipo: str | None) -> str | None:
     if not tipo:
         return None
     lowered = tipo.lower()
@@ -3920,7 +3911,7 @@ def _instrument_mask_label(tipo: Optional[str]) -> Optional[str]:
     return None
 
 
-def _mask_om_label(text: str, uasg_nome: Optional[str]) -> Optional[str]:
+def _mask_om_label(text: str, uasg_nome: str | None) -> str | None:
     normalized = _normalize_for_regex(text).upper()
     if uasg_nome:
         mapped = MASK_OM_ABBREVIATIONS.get(_normalize_whitespace(uasg_nome).upper())
@@ -3932,7 +3923,7 @@ def _mask_om_label(text: str, uasg_nome: Optional[str]) -> Optional[str]:
     return None
 
 
-def _apply_preferred_om_to_mask(mask_text: Optional[str], preferred_om: Optional[str]) -> Optional[str]:
+def _apply_preferred_om_to_mask(mask_text: str | None, preferred_om: str | None) -> str | None:
     if not mask_text or not preferred_om:
         return mask_text
 
@@ -3947,7 +3938,7 @@ def _apply_preferred_om_to_mask(mask_text: Optional[str], preferred_om: Optional
     return updated
 
 
-def _apply_mask_header_dash(mask_text: Optional[str]) -> Optional[str]:
+def _apply_mask_header_dash(mask_text: str | None) -> str | None:
     if not mask_text:
         return mask_text
 
@@ -3972,7 +3963,7 @@ def _normalize_mask_text(text: str) -> str:
     return cleaned
 
 
-def _apply_preferred_nd_to_mask(mask_text: Optional[str], preferred_nd: Optional[str], nd_req: Optional[str]) -> Optional[str]:
+def _apply_preferred_nd_to_mask(mask_text: str | None, preferred_nd: str | None, nd_req: str | None) -> str | None:
     if not mask_text or not preferred_nd:
         return mask_text
 
@@ -4011,7 +4002,7 @@ def _apply_preferred_nd_to_mask(mask_text: Optional[str], preferred_nd: Optional
     return updated
 
 
-def _normalize_mask_nd_token(token: str) -> Optional[str]:
+def _normalize_mask_nd_token(token: str) -> str | None:
     cleaned = _normalize_whitespace(str(token or ""))
     if not cleaned:
         return None
@@ -4028,7 +4019,7 @@ def _normalize_mask_nd_token(token: str) -> Optional[str]:
     return None
 
 
-def _mask_contains_preferred_nd(mask_text: Optional[str], preferred_nd: Optional[str]) -> bool:
+def _mask_contains_preferred_nd(mask_text: str | None, preferred_nd: str | None) -> bool:
     if not mask_text or not preferred_nd:
         return False
 
@@ -4039,7 +4030,7 @@ def _mask_contains_preferred_nd(mask_text: Optional[str], preferred_nd: Optional
     return False
 
 
-def _build_mask_generation_context(requisition_text: str, data: Stage2Data) -> Dict[str, Any]:
+def _build_mask_generation_context(requisition_text: str, data: Stage2Data) -> dict[str, Any]:
     budget = _extract_mask_budget_fields(requisition_text)
     nd_mask, nd_warnings = _resolve_mask_nd(budget, data.nd_req)
     instrument_label = _instrument_mask_label(data.instrumento.tipo if data.instrumento else None)
@@ -4154,7 +4145,7 @@ Retorne APENAS JSON válido neste formato:
 """.strip()
 
 
-def generate_mask_with_ai(requisition_text: str, data: Stage2Data) -> Optional[Stage2Mask]:
+def generate_mask_with_ai(requisition_text: str, data: Stage2Data) -> Stage2Mask | None:
     if not requisition_text.strip() or not data.instrumento or not data.uasg:
         return None
 
@@ -4252,7 +4243,7 @@ def generate_mask_with_ai(requisition_text: str, data: Stage2Data) -> Optional[S
 def generate_nd_and_mask_with_ai(
     requisition_text: str,
     data: Stage2Data,
-) -> Tuple[Optional[Stage2NDVerification], Optional[Stage2Mask]]:
+) -> tuple[Stage2NDVerification | None, Stage2Mask | None]:
     if not data.itens:
         return None, None
 
@@ -4290,10 +4281,10 @@ def generate_nd_and_mask_with_ai(
     nd_raw = result.get("verificacao_nd")
     mask_raw = result.get("mascara")
 
-    nd_result: Optional[Stage2NDVerification] = None
+    nd_result: Stage2NDVerification | None = None
     if isinstance(nd_raw, dict):
         itens_result = nd_raw.get("itens") or []
-        verification_items: List[Stage2NDVerificationItem] = []
+        verification_items: list[Stage2NDVerificationItem] = []
         for item_raw in itens_result:
             if not isinstance(item_raw, dict):
                 continue
@@ -4330,7 +4321,7 @@ def generate_nd_and_mask_with_ai(
             confidence=nd_confidence,
         )
 
-    mask_result: Optional[Stage2Mask] = None
+    mask_result: Stage2Mask | None = None
     if isinstance(mask_raw, dict):
         mask_text = mask_raw.get("mascara")
         confidence_raw = mask_raw.get("confidence")
@@ -4400,9 +4391,9 @@ def generate_nd_and_mask_with_ai(
 
 
 def _build_stage2_uasg(
-    codigo: Optional[str],
-    nome: Optional[str],
-    instrumento_tipo: Optional[str] = None,
+    codigo: str | None,
+    nome: str | None,
+    instrumento_tipo: str | None = None,
 ) -> Stage2UASG:
     """
     Constrói o objeto UASG garantindo que, quando houver código conhecido,
@@ -4433,12 +4424,12 @@ def _build_stage2_uasg(
 
 
 def run(
-    all_pages: Dict[str, str],
+    all_pages: dict[str, str],
     pdf_path: str | Path | None = None,
-    image_pages: List[int] | None = None,
+    image_pages: list[int] | None = None,
     total_pages: int = 0,
     nup_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Executa o Estágio 2 usando todas as páginas extraídas.
 
@@ -4471,7 +4462,7 @@ def run(
         )
         return result.model_dump()
 
-    texts: List[str] = []
+    texts: list[str] = []
     for page_num in requisition_pages:
         key = f"pagina_{page_num}"
         texts.append(all_pages.get(key, "") or "")
@@ -4663,7 +4654,7 @@ def run(
     data.mascara_personalizada = mascara_personalizada
 
     used_ai = False
-    ai_conf: Optional[int] = None
+    ai_conf: int | None = None
 
     missing_core = sum(
         1
@@ -4751,9 +4742,7 @@ def run(
     method = "regex"
     if used_ai and extracted_by_ai:
         method = "hybrid"
-    elif used_ai:
-        method = "ai"
-    elif extracted_by_ai:
+    elif used_ai or extracted_by_ai:
         method = "ai"
 
     result = Stage2Result(

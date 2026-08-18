@@ -1,7 +1,11 @@
 import pytest
 
-from backend.stages.stage2_analysis import parse_nd_si, resolve_nd_candidate, compute_nd_req_from_items
 from backend.models import Stage2Item
+from backend.stages.stage2_analysis import (
+    compute_nd_req_from_items,
+    parse_nd_si,
+    resolve_nd_candidate,
+)
 
 
 def test_parse_partial_prefix_3390_invalid():

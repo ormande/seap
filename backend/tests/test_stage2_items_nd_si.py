@@ -64,7 +64,7 @@ def test_nd_si_item_prefers_full_pair_over_prefix(
     item_raw, expected_canonical, expected_display, expected_original
 ):
     result = _build_single_item_result(item_raw)
-    items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
+    items, _fornecedor, _cnpj, _valor_total_geral = _parse_table_result(result)
 
     assert len(items) == 1
     item = items[0]
@@ -94,7 +94,7 @@ def test_nd_si_item_simple_pairs_are_preserved(raw_value: str):
             "nd_si": raw_value,
         }
     )
-    items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
+    items, _fornecedor, _cnpj, _valor_total_geral = _parse_table_result(result)
 
     assert len(items) == 1
     item = items[0]
@@ -118,7 +118,7 @@ def test_item_number_preserves_real_first_column_non_sequential_values():
         ],
     }
 
-    items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
+    items, _fornecedor, _cnpj, _valor_total_geral = _parse_table_result(result)
 
     assert [item.item for item in items] == [29, 204]
 
@@ -142,7 +142,7 @@ def test_item_number_normalization_accepts_common_ocr_formats(raw_item_value, ex
         }
     )
 
-    items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
+    items, _fornecedor, _cnpj, _valor_total_geral = _parse_table_result(result)
 
     assert len(items) == 1
     assert items[0].item == expected_item
