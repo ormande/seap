@@ -3278,7 +3278,7 @@ def extract_items_table(
         items, fornecedor, cnpj, valor_total_geral = _parse_table_result(result)
 
     if not items or len(items) == 0:
-        print(f"[Stage2][{nup_id}] 0 itens na tentativa base (nativo/texto) → acionando Gemini Multimodal Vision", flush=True)
+        print(f"[Stage2][{nup_id}] 0 itens na tentativa base (nativo/texto) -> acionando Gemini Multimodal Vision", flush=True)
         if pdf_path and req_pages and page_to_base64:
             fallback_images: list[str] = []
             for p in req_pages:

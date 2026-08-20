@@ -27,12 +27,13 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# Modelos recomendados em ordem de preferência
+# Modelos recomendados em ordem de preferência e capacidade de quota
 CANDIDATE_MODELS = [
-    "gemini-3.5-flash",
+    "gemini-flash-latest",
     "gemini-3.6-flash",
     "gemini-3.7-flash",
-    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
 ]
 
@@ -116,9 +117,16 @@ class NDClassificationOutput(BaseModel):
     confianca: str = Field(default="media", description="'alta', 'media' ou 'baixa'")
 
 
+class VerificationCorrection(BaseModel):
+    campo: str = Field(..., description="Nome do campo corrigido")
+    valor_anterior: str | None = Field(None, description="Valor original")
+    valor_corrigido: str | None = Field(None, description="Valor sugerido correto")
+    motivo: str | None = Field(None, description="Motivo da correção")
+
+
 class VerificationOutput(BaseModel):
     score_confianca: float = Field(..., description="Score de 0.0 a 1.0 indicando conformidade da extração")
-    correcoes: list[dict[str, Any]] = Field(default_factory=list, description="Correções sugeridas")
+    correcoes: list[VerificationCorrection] = Field(default_factory=list, description="Correções sugeridas")
 
 
 # --- Prompts Especializados do Exército Brasileiro ---
@@ -145,8 +153,8 @@ Exemplo de estrutura militar esperada:
 """
 
 
-def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
-    """Executa função com retry exponencial para timeout e rate limit."""
+def _retry_with_backoff(func, max_retries: int = 2, base_delay: float = 0.5):
+    """Executa função com retry rápido para timeout e erros transitórios 503."""
     last_error = None
     for attempt in range(max_retries):
         try:
@@ -154,10 +162,11 @@ def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
         except Exception as e:
             last_error = e
             msg = str(e).lower()
+            if "quota" in msg or "resource_exhausted" in msg or "free_tier" in msg:
+                # Cota do modelo esgotada: repassa imediatamente para tentar o próximo modelo candidato
+                raise
             if (
                 "rate" in msg
-                or "resource" in msg
-                or "429" in msg
                 or "timeout" in msg
                 or "503" in msg
                 or "unavailable" in msg
@@ -172,6 +181,8 @@ def _retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
                     delay,
                 )
                 time.sleep(delay)
+            else:
+                raise
     if last_error is not None:
         raise last_error
     raise RuntimeError("Número máximo de tentativas excedido.")
@@ -199,15 +210,21 @@ class GeminiProcessor:
         temperature: float = 0.1,
     ) -> Any:
         """Tenta a chamada no modelo prioritário e faz fallback automático se o modelo estiver indisponível."""
+        valid_schema = (
+            schema
+            if (isinstance(schema, (type, dict)) or hasattr(schema, "__origin__"))
+            else None
+        )
+
         last_err = None
         for model_name in CANDIDATE_MODELS:
             try:
                 config_kwargs: dict[str, Any] = {
                     "temperature": temperature,
                 }
-                if schema is not None:
+                if valid_schema is not None:
                     config_kwargs["response_mime_type"] = "application/json"
-                    config_kwargs["response_schema"] = schema
+                    config_kwargs["response_schema"] = valid_schema
                 else:
                     config_kwargs["response_mime_type"] = "application/json"
 
@@ -231,7 +248,6 @@ class GeminiProcessor:
                 logger.warning("Modelo %s indisponível (%s). Tentando próximo modelo...", model_name, exc)
                 if "not_found" in err_msg or "404" in err_msg or "503" in err_msg or "unavailable" in err_msg:
                     continue
-                # Se for outro erro, continua tentando fallback
                 continue
 
         if last_err:
@@ -239,10 +255,17 @@ class GeminiProcessor:
         raise RuntimeError("Nenhum modelo do Gemini respondeu com sucesso.")
 
     def _generate(
-        self, prompt: str, schema: Any = None, operation: str = "general"
+        self,
+        prompt: str,
+        operation: str | Any = "general",
+        schema: Any = None,
     ) -> tuple[dict[str, Any], int, int]:
         """Gera resposta estruturada a partir de texto."""
-        response = self._call_model_with_fallback(contents=prompt, schema=schema)
+        target_schema = schema
+        if isinstance(operation, (type, dict)) or hasattr(operation, "__origin__"):
+            target_schema = operation
+
+        response = self._call_model_with_fallback(contents=prompt, schema=target_schema)
         usage = getattr(response, "usage_metadata", None)
         input_tokens = getattr(usage, "prompt_token_count", 0) or 0
         output_tokens = getattr(usage, "candidates_token_count", 0) or 0
@@ -262,6 +285,44 @@ class GeminiProcessor:
         except json.JSONDecodeError:
             logger.warning("Falha ao decodificar JSON gerado: %s", text[:200])
             return {}, input_tokens, output_tokens
+
+    def generate_text(
+        self,
+        prompt: str,
+        operation: str = "general",
+        system_instruction: str | None = None,
+        temperature: float = 0.2,
+    ) -> str:
+        """Gera texto livre a partir de um prompt."""
+        last_err = None
+        for model_name in CANDIDATE_MODELS:
+            try:
+                config_kwargs: dict[str, Any] = {
+                    "temperature": temperature,
+                }
+                if system_instruction:
+                    config_kwargs["system_instruction"] = system_instruction
+
+                config = types.GenerateContentConfig(**config_kwargs)
+
+                def _exec():
+                    return self._client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=config,
+                    )
+
+                response = _retry_with_backoff(_exec, max_retries=2, base_delay=1.0)
+                return (response.text or "").strip()
+            except Exception as exc:
+                last_err = exc
+                err_msg = str(exc).lower()
+                logger.warning("Modelo %s indisponível (%s). Tentando próximo modelo...", model_name, exc)
+                continue
+
+        if last_err:
+            raise last_err
+        return ""
 
     def _generate_with_images(
         self,

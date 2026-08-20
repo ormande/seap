@@ -557,11 +557,37 @@ def run(all_stages: dict[str, Any]) -> dict[str, Any]:
     - Opcionalmente gera um despacho sugerido.
     """
     nup_id = all_stages.get("nup_id", "")
-    stage1: Stage1Result | None = all_stages.get("stage1")
-    stage2: Stage2Result | None = all_stages.get("stage2")
-    stage3: Stage3Result | None = all_stages.get("stage3")
-    stage4: Stage4Result | None = all_stages.get("stage4")
-    stage5: Stage5Result | None = all_stages.get("stage5")
+    stage1 = all_stages.get("stage1")
+    stage2 = all_stages.get("stage2")
+    stage3 = all_stages.get("stage3")
+    stage4 = all_stages.get("stage4")
+    stage5 = all_stages.get("stage5")
+
+    if isinstance(stage1, dict):
+        try:
+            stage1 = Stage1Result(**stage1)
+        except Exception:
+            stage1 = None
+    if isinstance(stage2, dict):
+        try:
+            stage2 = Stage2Result(**stage2)
+        except Exception:
+            stage2 = None
+    if isinstance(stage3, dict):
+        try:
+            stage3 = Stage3Result(**stage3)
+        except Exception:
+            stage3 = None
+    if isinstance(stage4, dict):
+        try:
+            stage4 = Stage4Result(**stage4)
+        except Exception:
+            stage4 = None
+    if isinstance(stage5, dict):
+        try:
+            stage5 = Stage5Result(**stage5)
+        except Exception:
+            stage5 = None
 
     issues = collect_issues(stage1, stage2, stage3, stage4, stage5)
     print(
@@ -575,7 +601,17 @@ def run(all_stages: dict[str, Any]) -> dict[str, Any]:
     print(f"[Stage6][{nup_id}] Veredicto: {verdict}", flush=True)
 
     # Despacho só é gerado para aprovado_com_ressalva ou reprovado.
-    despacho_text = generate_dispatch(verdict, issues, all_stages)
+    despacho_text = generate_dispatch(
+        verdict,
+        issues,
+        {
+            "stage1": stage1,
+            "stage2": stage2,
+            "stage3": stage3,
+            "stage4": stage4,
+            "stage5": stage5,
+        },
+    )
     has_despacho = "sim" if despacho_text else "não"
     print(f"[Stage6][{nup_id}] Despacho gerado: {has_despacho}", flush=True)
 
